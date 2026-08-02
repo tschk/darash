@@ -6,31 +6,66 @@ use serde::{de::Deserializer, Deserialize, Serialize};
 use thiserror::Error;
 use url::{form_urlencoded, Url};
 
+mod cache;
 mod embedded_search;
+mod websurfx;
+
+pub use websurfx::{
+    build_search_url as build_websurfx_search_url, WebsurfxEngineError, WebsurfxError,
+    WebsurfxMappedResponse, WebsurfxMetadata, WebsurfxQuery, WebsurfxResponse, WebsurfxResult,
+    WebsurfxSearchResponse, WebsurfxSearchResult,
+};
 
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:8080";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SafeSearch {
     #[default]
     Off,
     Moderate,
     Strict,
+    Level3,
+    Level4,
 }
 
 impl SafeSearch {
+    pub const fn level(self) -> u8 {
+        match self {
+            Self::Off => 0,
+            Self::Moderate => 1,
+            Self::Strict => 2,
+            Self::Level3 => 3,
+            Self::Level4 => 4,
+        }
+    }
+
+    pub const fn from_level(level: u8) -> Option<Self> {
+        match level {
+            0 => Some(Self::Off),
+            1 => Some(Self::Moderate),
+            2 => Some(Self::Strict),
+            3 => Some(Self::Level3),
+            4 => Some(Self::Level4),
+            _ => None,
+        }
+    }
+
     fn value(self) -> &'static str {
         match self {
             Self::Off => "0",
             Self::Moderate => "1",
             Self::Strict => "2",
+            Self::Level3 => "3",
+            Self::Level4 => "4",
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum TimeRange {
     Day,
     Week,
@@ -39,13 +74,17 @@ pub enum TimeRange {
 }
 
 impl TimeRange {
-    fn value(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Day => "day",
             Self::Week => "week",
             Self::Month => "month",
             Self::Year => "year",
         }
+    }
+
+    fn value(self) -> &'static str {
+        self.as_str()
     }
 }
 
@@ -94,11 +133,35 @@ impl SearchMode {
         }
     }
 
-    fn result_limit(self) -> usize {
+    pub const fn result_limit(self) -> usize {
         match self {
             Self::Speed => 5,
             Self::Balanced => 10,
             Self::Quality => 20,
+        }
+    }
+
+    pub const fn provider_limit(self) -> usize {
+        match self {
+            Self::Speed => 1,
+            Self::Balanced => 2,
+            Self::Quality => 3,
+        }
+    }
+
+    pub const fn provider_concurrency(self) -> usize {
+        match self {
+            Self::Speed => 1,
+            Self::Balanced => 2,
+            Self::Quality => 3,
+        }
+    }
+
+    pub const fn provider_result_limit(self) -> usize {
+        match self {
+            Self::Speed => 5,
+            Self::Balanced => 10,
+            Self::Quality => 10,
         }
     }
 }
@@ -172,7 +235,9 @@ impl SearchRequest {
             .map(|source| source.category())
             .collect::<Vec<_>>()
             .join(",");
-        SearchQuery::new(self.query.clone()).with_categories(categories)
+        SearchQuery::new(self.query.clone())
+            .with_categories(categories)
+            .with_mode(self.mode)
     }
 }
 
@@ -180,6 +245,7 @@ impl SearchRequest {
 pub struct SearchQuery {
     query: String,
     categories: Option<String>,
+    mode: SearchMode,
     engines: Vec<String>,
     language: Option<String>,
     page: Option<u32>,
@@ -192,6 +258,7 @@ impl SearchQuery {
         Self {
             query: query.into(),
             categories: None,
+            mode: SearchMode::default(),
             engines: Vec::new(),
             language: None,
             page: None,
@@ -202,6 +269,26 @@ impl SearchQuery {
 
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    pub fn mode(&self) -> SearchMode {
+        self.mode
+    }
+
+    pub fn with_mode(mut self, mode: SearchMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub(crate) fn page_offset(&self, per_page: u32) -> Result<u32, Error> {
+        match self.page {
+            None => Ok(0),
+            Some(0) => Err(Error::InvalidPage),
+            Some(page) => page
+                .checked_sub(1)
+                .and_then(|page| page.checked_mul(per_page))
+                .ok_or(Error::PageOverflow),
+        }
     }
 
     pub fn with_categories(mut self, categories: impl Into<String>) -> Self {
@@ -238,6 +325,16 @@ impl SearchQuery {
         self
     }
 
+    pub fn filters(&self) -> SearchFilters {
+        SearchFilters {
+            safe_search_level: self.safe_search.unwrap_or_default().level(),
+            time_range: self.time_range,
+            filtered: false,
+            disallowed: false,
+            no_providers_selected: false,
+        }
+    }
+
     pub fn to_query_string(&self) -> String {
         let mut serializer = form_urlencoded::Serializer::new(String::new());
         serializer.append_pair("q", &self.query);
@@ -269,6 +366,10 @@ impl SearchQuery {
 pub struct SearchConfig {
     endpoint: Url,
     timeout: Duration,
+    cache_capacity: usize,
+    cache_ttl: Duration,
+    blocklist: Vec<String>,
+    allowlist: Vec<String>,
 }
 
 impl SearchConfig {
@@ -292,11 +393,39 @@ impl SearchConfig {
         Ok(Self {
             endpoint,
             timeout: DEFAULT_TIMEOUT,
+            cache_capacity: 64,
+            cache_ttl: Duration::from_secs(60),
+            blocklist: Vec::new(),
+            allowlist: Vec::new(),
         })
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    pub fn with_cache(mut self, capacity: usize, ttl: Duration) -> Self {
+        self.cache_capacity = capacity;
+        self.cache_ttl = ttl;
+        self
+    }
+
+    pub fn with_blocklist<I, S>(mut self, terms: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.blocklist = terms.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn with_allowlist<I, S>(mut self, terms: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.allowlist = terms.into_iter().map(Into::into).collect();
         self
     }
 
@@ -307,6 +436,10 @@ impl SearchConfig {
     pub fn timeout(&self) -> Duration {
         self.timeout
     }
+
+    pub fn cache_settings(&self) -> (usize, Duration) {
+        (self.cache_capacity, self.cache_ttl)
+    }
 }
 
 #[derive(Clone)]
@@ -314,6 +447,7 @@ pub struct SearchClient {
     http: reqwest::Client,
     config: SearchConfig,
     embedded: bool,
+    cache: cache::TtlCache<String, SearchResponse>,
 }
 
 impl SearchClient {
@@ -338,6 +472,7 @@ impl SearchClient {
             .map_err(Error::ClientBuild)?;
         Ok(Self {
             http,
+            cache: cache::TtlCache::new(config.cache_capacity, config.cache_ttl),
             config,
             embedded: false,
         })
@@ -347,6 +482,14 @@ impl SearchClient {
         &self.config
     }
 
+    pub fn clear_cache(&self) {
+        self.cache.clear();
+    }
+
+    pub fn cached_entries(&self) -> usize {
+        self.cache.len()
+    }
+
     pub async fn search(&self, query: &SearchQuery) -> Result<SearchResponse, Error> {
         if query.query.trim().is_empty() {
             return Err(Error::EmptyQuery);
@@ -354,9 +497,35 @@ impl SearchClient {
         if query.page == Some(0) {
             return Err(Error::InvalidPage);
         }
+        query.page_offset(10)?;
+
+        let cache_key = format!(
+            "{}:{}:{}",
+            self.embedded,
+            query.mode().as_str(),
+            query.to_query_string()
+        );
+        if let Some(response) = self.cache.get(&cache_key) {
+            return Ok(response);
+        }
 
         if self.embedded {
-            return embedded_search::search(&self.http, query).await;
+            let outcome =
+                embedded_search::search_with_outcome(&self.http, query, &self.config).await?;
+            let mut response = outcome.response;
+            for failure in outcome.failures {
+                if !response
+                    .provider_status
+                    .iter()
+                    .any(|status| status.provider == failure.provider)
+                {
+                    response
+                        .provider_status
+                        .push(ProviderStatus::failed(failure.provider, failure.error));
+                }
+            }
+            self.cache.insert(cache_key, response.clone());
+            return Ok(response);
         }
 
         let mut url = self.search_url();
@@ -377,6 +546,8 @@ impl SearchClient {
         if response.sources.is_empty() {
             response.sources = response.citations();
         }
+        response.filters = query.filters();
+        self.cache.insert(cache_key, response.clone());
         Ok(response)
     }
 
@@ -384,6 +555,23 @@ impl SearchClient {
         let mut response = self.search(&request.search_query()).await?;
         limit_response(&mut response, request.mode);
         Ok(response)
+    }
+
+    pub async fn search_websurfx(
+        &self,
+        query: &WebsurfxQuery,
+    ) -> Result<WebsurfxMappedResponse, Error> {
+        let url = websurfx::build_search_url(self.config.endpoint(), query)
+            .map_err(|error| Error::InvalidEndpoint(error.to_string()))?;
+        let response = self.http.get(url).send().await.map_err(Error::Request)?;
+        let status = response.status();
+        let body = read_response_body(response).await?;
+        if !status.is_success() {
+            return Err(Error::HttpStatus { status, body });
+        }
+        let response: WebsurfxSearchResponse =
+            serde_json::from_str(&body).map_err(Error::Decode)?;
+        Ok(response.into_search_response(query.query()))
     }
 
     fn search_url(&self) -> Url {
@@ -427,6 +615,57 @@ async fn read_response_body(response: reqwest::Response) -> Result<String, Error
     String::from_utf8(body).map_err(|error| Error::InvalidResponseEncoding(error.to_string()))
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderStatusKind {
+    Success,
+    Failed,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProviderStatus {
+    pub provider: String,
+    pub status: ProviderStatusKind,
+    #[serde(default)]
+    pub result_count: u64,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl ProviderStatus {
+    pub fn success(provider: impl Into<String>, result_count: usize) -> Self {
+        Self {
+            provider: provider.into(),
+            status: ProviderStatusKind::Success,
+            result_count: result_count as u64,
+            error: None,
+        }
+    }
+
+    pub fn failed(provider: impl Into<String>, error: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            status: ProviderStatusKind::Failed,
+            result_count: 0,
+            error: Some(error.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SearchFilters {
+    #[serde(default)]
+    pub safe_search_level: u8,
+    #[serde(default)]
+    pub time_range: Option<TimeRange>,
+    #[serde(default)]
+    pub filtered: bool,
+    #[serde(default)]
+    pub disallowed: bool,
+    #[serde(default)]
+    pub no_providers_selected: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SearchResponse {
     #[serde(default)]
@@ -445,6 +684,10 @@ pub struct SearchResponse {
     pub corrections: Vec<String>,
     #[serde(default)]
     pub suggestions: Vec<String>,
+    #[serde(default)]
+    pub provider_status: Vec<ProviderStatus>,
+    #[serde(default)]
+    pub filters: SearchFilters,
 }
 
 impl SearchResponse {
@@ -552,6 +795,8 @@ pub enum Error {
     EmptyQuery,
     #[error("page must be at least 1")]
     InvalidPage,
+    #[error("page is too large for the provider offset")]
+    PageOverflow,
     #[error("failed to build HTTP client: {0}")]
     ClientBuild(#[source] reqwest::Error),
     #[error("search request failed: {0}")]
@@ -615,6 +860,64 @@ mod tests {
     }
 
     #[test]
+    fn safe_search_supports_levels_zero_through_four() {
+        for level in 0..=4 {
+            assert_eq!(
+                SafeSearch::from_level(level)
+                    .expect("supported level")
+                    .level(),
+                level
+            );
+        }
+        assert_eq!(SafeSearch::from_level(5), None);
+        assert_eq!(SafeSearch::Level4.value(), "4");
+    }
+
+    #[test]
+    fn query_carries_mode_filters_and_checked_page_offsets() {
+        let query = SearchQuery::new("rust")
+            .with_mode(SearchMode::Quality)
+            .with_safe_search(SafeSearch::Level3)
+            .with_time_range(TimeRange::Week)
+            .with_page(3);
+        assert_eq!(query.mode(), SearchMode::Quality);
+        assert_eq!(query.filters().safe_search_level, 3);
+        assert_eq!(query.filters().time_range, Some(TimeRange::Week));
+        assert_eq!(query.page_offset(10).expect("page offset"), 20);
+        assert_eq!(query.mode().provider_result_limit(), 10);
+
+        let oversized = SearchQuery::new("rust").with_page(u32::MAX);
+        assert!(matches!(
+            oversized.page_offset(10),
+            Err(Error::PageOverflow)
+        ));
+    }
+
+    #[test]
+    fn search_modes_expose_retrieval_limits() {
+        assert_eq!(SearchMode::Speed.provider_limit(), 1);
+        assert_eq!(SearchMode::Speed.provider_concurrency(), 1);
+        assert_eq!(SearchMode::Balanced.provider_limit(), 2);
+        assert_eq!(SearchMode::Balanced.provider_concurrency(), 2);
+        assert_eq!(SearchMode::Quality.provider_limit(), 3);
+        assert_eq!(SearchMode::Quality.provider_concurrency(), 3);
+        assert_eq!(SearchMode::Quality.provider_result_limit(), 10);
+    }
+
+    #[test]
+    fn provider_status_is_additive_and_serde_compatible() {
+        let status = ProviderStatus::failed("openalex", "rate limited");
+        let response: SearchResponse =
+            serde_json::from_str(r#"{"query":"rust"}"#).expect("legacy response remains readable");
+        assert!(response.provider_status.is_empty());
+        assert_eq!(status.status, ProviderStatusKind::Failed);
+        assert_eq!(status.error.as_deref(), Some("rate limited"));
+        let encoded = serde_json::to_value(status).expect("status serializes");
+        assert_eq!(encoded["provider"], "openalex");
+        assert_eq!(encoded["status"], "failed");
+    }
+
+    #[test]
     fn mode_limits_results_without_replacing_backend_sources() {
         let source = Citation {
             title: "Backend source".to_owned(),
@@ -643,6 +946,8 @@ mod tests {
             sources: vec![source.clone(); count as usize],
             corrections: Vec::new(),
             suggestions: Vec::new(),
+            provider_status: Vec::new(),
+            filters: SearchFilters::default(),
         };
 
         for (mode, limit) in [

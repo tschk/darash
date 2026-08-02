@@ -30,7 +30,7 @@ Add Darash from crates.io:
 
 ```toml
 [dependencies]
-darash = "0.3.1"
+darash = "0.4.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -100,29 +100,35 @@ concurrently:
 - `academic` queries OpenAlex works.
 - `discussions` queries Hacker News Algolia results.
 
-Each provider contributes up to 10 results before URL deduplication and
-relevance ranking. A provider failure is ignored when another selected
-provider returns results. If every selected provider fails, the call returns
-`Error::Local` with the provider errors; successful responses do not carry
-per-provider failure metadata. Local responses do not provide backend answers,
-corrections, or suggestions.
+Each selected provider contributes up to 5 results in `speed` mode and up to 10
+in `balanced` or `quality` mode before URL deduplication and relevance ranking.
+`SearchQuery::with_engines` selects the local provider names
+`duckduckgo`/`ddg`, `openalex`, and `hacker-news`/`hn`; source categories remain
+the convenient default selection. `SearchResponse::provider_status` preserves
+success and failure information when one provider is unavailable.
 
-`SearchMode` caps the returned `results` and `sources` at 5 (`speed`), 10
-(`balanced`), or 20 (`quality`). `number_of_results` is not changed by that
-cap: the local backend reports its deduplicated count, while a remote SearxNG
-backend reports its count or falls back to the decoded result count when the
-field is absent.
+`SearchMode` limits provider selection and retrieval as well as the returned
+`results` and `sources`: speed selects one provider and returns at most 5
+results, balanced selects up to two and returns at most 10, and quality selects
+all requested providers and returns at most 20. `number_of_results` is not
+changed by that cap.
 
-`SafeSearch::Off`, `Moderate`, and `Strict` map to SearxNG `safesearch` values
-0, 1, and 2. In local mode the value is passed to DuckDuckGo; OpenAlex and
-Hacker News do not apply it. Darash has no allowlist, blocklist, or persistent
-result cache; remote caching remains a property of the configured SearxNG
-service.
+`SafeSearch` supports levels 0 through 4. Remote requests use the SearxNG
+values; local DuckDuckGo requests use DuckDuckGo's native values and date-range
+codes. Configure local level-3/4 filtering with
+`SearchConfig::with_blocklist` and `with_allowlist`. The response exposes the
+applied level and `filtered`/`disallowed` flags in `SearchFilters`. Local
+responses use a bounded in-memory TTL cache by default; configure it with
+`with_cache` or call `clear_cache` on the client.
 
 The local backend is a direct in-process adapter. It does not start an HTTP
-listener, expose a Websurfx route or protocol, spawn a search subprocess, or
-read Websurfx configuration or assets. The Websurfx adapter that shipped in
-Darash 0.2.0 is not part of the 0.3.x releases.
+listener, expose a Websurfx server, spawn a search subprocess, or read
+Websurfx configuration or assets. The dependency-free Websurfx compatibility
+types and URL builder are available for hosts that already run Websurfx; they
+do not embed Websurfx or add its AGPL dependency tree. Use
+`SearchClient::search_websurfx` when a configured endpoint is a Websurfx
+server; it maps Websurfx's engine and error metadata into Darash's response
+model.
 
 ## CLI
 

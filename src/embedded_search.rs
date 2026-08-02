@@ -1,9 +1,12 @@
-use crate::{Error, SearchQuery, SearchResponse, SearchResult};
+use crate::{
+    Error, ProviderStatus, SafeSearch, SearchConfig, SearchQuery, SearchResponse, SearchResult,
+    TimeRange,
+};
 use futures_util::future::join_all;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use url::{form_urlencoded, Url};
 
 const DUCKDUCKGO_ENDPOINT: &str = "https://html.duckduckgo.com/html/";
@@ -11,6 +14,28 @@ const OPENALEX_ENDPOINT: &str = "https://api.openalex.org/works";
 const HACKER_NEWS_ENDPOINT: &str = "https://hn.algolia.com/api/v1/search";
 const RESULTS_PER_PROVIDER: usize = 10;
 const USER_AGENT: &str = "darash-search/0.3";
+const MAX_PROVIDER_ERROR_BYTES: usize = 8 * 1024;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ProviderFailure {
+    pub(crate) provider: &'static str,
+    pub(crate) error: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SearchOutcome {
+    pub(crate) response: SearchResponse,
+    pub(crate) failures: Vec<ProviderFailure>,
+}
+
+impl ProviderFailure {
+    fn new(provider: Provider, error: impl Into<String>) -> Self {
+        Self {
+            provider: provider.name(),
+            error: error.into(),
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 enum Provider {
@@ -35,45 +60,127 @@ impl Provider {
             Self::Discussions => "social media",
         }
     }
+
+    fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "duckduckgo" | "ddg" | "web" => Some(Self::Web),
+            "openalex" | "academic" | "science" => Some(Self::Academic),
+            "hacker-news" | "hackernews" | "hn" | "discussions" => Some(Self::Discussions),
+            _ => None,
+        }
+    }
 }
 
-pub(crate) async fn search(client: &Client, query: &SearchQuery) -> Result<SearchResponse, Error> {
+pub(crate) async fn search_with_outcome(
+    client: &Client,
+    query: &SearchQuery,
+    config: &SearchConfig,
+) -> Result<SearchOutcome, Error> {
+    validate_page(query)?;
     let providers = providers(query);
-    let outcomes = join_all(
-        providers
-            .iter()
-            .copied()
-            .map(|provider| fetch_provider(client, provider, query)),
-    )
-    .await;
+    if query.safe_search == Some(SafeSearch::Level4) && matches_blocklist(query.query(), config) {
+        let mut filters = query.filters();
+        filters.disallowed = true;
+        return Ok(SearchOutcome {
+            response: SearchResponse {
+                query: query.query().to_owned(),
+                number_of_results: 0,
+                results: Vec::new(),
+                answers: Vec::new(),
+                answer: None,
+                sources: Vec::new(),
+                corrections: Vec::new(),
+                suggestions: Vec::new(),
+                provider_status: Vec::new(),
+                filters,
+            },
+            failures: Vec::new(),
+        });
+    }
+    let outcomes =
+        join_all(providers.iter().copied().map(|provider| async move {
+            (provider, fetch_provider(client, provider, query).await)
+        }))
+        .await;
 
     let mut results = Vec::new();
     let mut failures = Vec::new();
-    for outcome in outcomes {
+    let mut provider_status = Vec::with_capacity(outcomes.len());
+    for (provider, outcome) in outcomes {
         match outcome {
-            Ok(provider_results) => results.extend(provider_results),
-            Err(error) => failures.push(error),
+            Ok(provider_results) => {
+                provider_status.push(ProviderStatus::success(
+                    provider.name(),
+                    provider_results.len(),
+                ));
+                results.extend(provider_results);
+            }
+            Err(error) => {
+                provider_status.push(ProviderStatus::failed(error.provider, &error.error));
+                failures.push(error);
+            }
         }
     }
     if results.is_empty() && !failures.is_empty() {
-        return Err(Error::Local(failures.join("; ")));
+        return Err(Error::Local(
+            failures
+                .iter()
+                .map(|failure| format!("{}: {}", failure.provider, failure.error))
+                .collect::<Vec<_>>()
+                .join("; "),
+        ));
     }
 
-    let results = dedupe_and_rank(query.query(), results);
+    let mut results = dedupe_and_rank(query.query(), results);
+    let before_filter = results.len();
+    if query.safe_search.unwrap_or_default().level() >= 3 {
+        results.retain(|result| {
+            !matches_blocklist_result(result, config) || matches_allowlist_result(result, config)
+        });
+    }
+    let mut filters = query.filters();
+    filters.filtered = results.len() != before_filter;
+    filters.no_providers_selected = providers.is_empty();
     let sources = results.iter().map(SearchResult::citation).collect();
-    Ok(SearchResponse {
-        query: query.query().to_owned(),
-        number_of_results: results.len() as u64,
-        results,
-        answers: Vec::new(),
-        answer: None,
-        sources,
-        corrections: Vec::new(),
-        suggestions: Vec::new(),
+    Ok(SearchOutcome {
+        response: SearchResponse {
+            query: query.query().to_owned(),
+            number_of_results: results.len() as u64,
+            results,
+            answers: Vec::new(),
+            answer: None,
+            sources,
+            corrections: Vec::new(),
+            suggestions: Vec::new(),
+            provider_status,
+            filters,
+        },
+        failures,
     })
 }
 
 fn providers(query: &SearchQuery) -> Vec<Provider> {
+    if !query.engines.is_empty() {
+        let selected: Vec<Provider> = query
+            .engines
+            .iter()
+            .filter_map(|name| Provider::from_name(name))
+            .fold(Vec::new(), |mut selected, provider| {
+                if !selected
+                    .iter()
+                    .any(|current| current.name() == provider.name())
+                {
+                    selected.push(provider);
+                }
+                selected
+            });
+        if !selected.is_empty() {
+            return selected
+                .into_iter()
+                .take(query.mode().provider_limit())
+                .collect();
+        }
+    }
     let categories = query.categories.as_deref().unwrap_or("general");
     let mut selected: Vec<Provider> = Vec::new();
     for category in categories.split(',').map(str::trim) {
@@ -93,13 +200,40 @@ fn providers(query: &SearchQuery) -> Vec<Provider> {
         selected.push(Provider::Web);
     }
     selected
+        .into_iter()
+        .take(query.mode().provider_limit())
+        .collect()
+}
+
+fn matches_blocklist(value: &str, config: &SearchConfig) -> bool {
+    let value = value.to_ascii_lowercase();
+    config
+        .blocklist
+        .iter()
+        .filter(|term| !term.trim().is_empty())
+        .any(|term| value.contains(&term.to_ascii_lowercase()))
+}
+
+fn matches_allowlist_result(result: &SearchResult, config: &SearchConfig) -> bool {
+    let value = format!("{} {} {}", result.title, result.url, result.content);
+    let value = value.to_ascii_lowercase();
+    config
+        .allowlist
+        .iter()
+        .filter(|term| !term.trim().is_empty())
+        .any(|term| value.contains(&term.to_ascii_lowercase()))
+}
+
+fn matches_blocklist_result(result: &SearchResult, config: &SearchConfig) -> bool {
+    let value = format!("{} {} {}", result.title, result.url, result.content);
+    matches_blocklist(&value, config)
 }
 
 async fn fetch_provider(
     client: &Client,
     provider: Provider,
     query: &SearchQuery,
-) -> Result<Vec<SearchResult>, String> {
+) -> Result<Vec<SearchResult>, ProviderFailure> {
     match provider {
         Provider::Web => fetch_web(client, provider, query).await,
         Provider::Academic => fetch_openalex(client, provider, query).await,
@@ -111,41 +245,37 @@ async fn fetch_web(
     client: &Client,
     provider: Provider,
     query: &SearchQuery,
-) -> Result<Vec<SearchResult>, String> {
-    let params = {
-        let mut serializer = form_urlencoded::Serializer::new(String::new());
-        serializer.append_pair("q", query.query());
-        serializer.append_pair(
-            "s",
-            &((query.page.unwrap_or(1) - 1) * RESULTS_PER_PROVIDER as u32).to_string(),
-        );
-        serializer.append_pair("kp", query.safe_search.unwrap_or_default().value());
-        if let Some(time_range) = query.time_range {
-            serializer.append_pair("df", time_range.value());
-        }
-        serializer.finish()
-    };
+) -> Result<Vec<SearchResult>, ProviderFailure> {
+    let params = duckduckgo_params(query).map_err(|error| ProviderFailure::new(provider, error))?;
     let url = format!("{DUCKDUCKGO_ENDPOINT}?{params}");
-    let body = get_body(client, &url).await?;
-    parse_duckduckgo(&body, provider)
+    let body = get_body(client, &url)
+        .await
+        .map_err(|error| ProviderFailure::new(provider, error))?;
+    let mut results =
+        parse_duckduckgo(&body, provider).map_err(|error| ProviderFailure::new(provider, error))?;
+    results.truncate(query.mode().provider_result_limit());
+    Ok(results)
 }
 
 async fn fetch_openalex(
     client: &Client,
     provider: Provider,
     query: &SearchQuery,
-) -> Result<Vec<SearchResult>, String> {
-    let params = {
-        let mut serializer = form_urlencoded::Serializer::new(String::new());
-        serializer.append_pair("search", query.query());
-        serializer.append_pair("per-page", &RESULTS_PER_PROVIDER.to_string());
-        serializer.append_pair("page", &query.page.unwrap_or(1).to_string());
-        serializer.finish()
-    };
+) -> Result<Vec<SearchResult>, ProviderFailure> {
+    let params = openalex_params(query);
     let url = format!("{OPENALEX_ENDPOINT}?{params}");
-    let body = get_body(client, &url).await?;
+    let body = get_body(client, &url)
+        .await
+        .map_err(|error| ProviderFailure::new(provider, error))?;
+    let mut results =
+        parse_openalex(&body, provider).map_err(|error| ProviderFailure::new(provider, error))?;
+    results.truncate(query.mode().provider_result_limit());
+    Ok(results)
+}
+
+fn parse_openalex(body: &str, provider: Provider) -> Result<Vec<SearchResult>, String> {
     let response: OpenAlexResponse =
-        serde_json::from_str(&body).map_err(|error| error.to_string())?;
+        serde_json::from_str(body).map_err(|error| error.to_string())?;
     Ok(response
         .results
         .into_iter()
@@ -179,18 +309,22 @@ async fn fetch_hacker_news(
     client: &Client,
     provider: Provider,
     query: &SearchQuery,
-) -> Result<Vec<SearchResult>, String> {
-    let params = {
-        let mut serializer = form_urlencoded::Serializer::new(String::new());
-        serializer.append_pair("query", query.query());
-        serializer.append_pair("hitsPerPage", &RESULTS_PER_PROVIDER.to_string());
-        serializer.append_pair("page", &(query.page.unwrap_or(1) - 1).to_string());
-        serializer.finish()
-    };
+) -> Result<Vec<SearchResult>, ProviderFailure> {
+    let params =
+        hacker_news_params(query).map_err(|error| ProviderFailure::new(provider, error))?;
     let url = format!("{HACKER_NEWS_ENDPOINT}?{params}");
-    let body = get_body(client, &url).await?;
+    let body = get_body(client, &url)
+        .await
+        .map_err(|error| ProviderFailure::new(provider, error))?;
+    let mut results = parse_hacker_news(&body, provider)
+        .map_err(|error| ProviderFailure::new(provider, error))?;
+    results.truncate(query.mode().provider_result_limit());
+    Ok(results)
+}
+
+fn parse_hacker_news(body: &str, provider: Provider) -> Result<Vec<SearchResult>, String> {
     let response: HackerNewsResponse =
-        serde_json::from_str(&body).map_err(|error| error.to_string())?;
+        serde_json::from_str(body).map_err(|error| error.to_string())?;
     Ok(response
         .hits
         .into_iter()
@@ -223,9 +357,79 @@ async fn get_body(client: &Client, url: &str) -> Result<String, String> {
         .await
         .map_err(|error| error.to_string())?;
     if !status.is_success() {
-        return Err(format!("HTTP {status}: {body}"));
+        return Err(format!("HTTP {status}: {}", bounded_error(&body)));
     }
     Ok(body)
+}
+
+fn bounded_error(value: &str) -> String {
+    value.chars().take(MAX_PROVIDER_ERROR_BYTES).collect()
+}
+
+fn validate_page(query: &SearchQuery) -> Result<(), Error> {
+    query.page_offset(RESULTS_PER_PROVIDER as u32).map(|_| ())
+}
+
+fn page_offset(query: &SearchQuery) -> Result<u32, String> {
+    query
+        .page_offset(RESULTS_PER_PROVIDER as u32)
+        .map_err(|error| error.to_string())
+}
+
+fn duckduckgo_params(query: &SearchQuery) -> Result<String, String> {
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("q", query.query());
+    serializer.append_pair("s", &page_offset(query)?.to_string());
+    serializer.append_pair(
+        "kp",
+        duckduckgo_safe_search(query.safe_search.unwrap_or_default()),
+    );
+    if let Some(time_range) = query.time_range {
+        serializer.append_pair("df", duckduckgo_time_range(time_range));
+    }
+    Ok(serializer.finish())
+}
+
+fn openalex_params(query: &SearchQuery) -> String {
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("search", query.query());
+    serializer.append_pair(
+        "per-page",
+        &query.mode().provider_result_limit().to_string(),
+    );
+    serializer.append_pair("page", &query.page.unwrap_or(1).to_string());
+    serializer.finish()
+}
+
+fn hacker_news_params(query: &SearchQuery) -> Result<String, String> {
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("query", query.query());
+    serializer.append_pair(
+        "hitsPerPage",
+        &query.mode().provider_result_limit().to_string(),
+    );
+    serializer.append_pair(
+        "page",
+        &(page_offset(query)? / RESULTS_PER_PROVIDER as u32).to_string(),
+    );
+    Ok(serializer.finish())
+}
+
+fn duckduckgo_safe_search(safe_search: SafeSearch) -> &'static str {
+    match safe_search {
+        SafeSearch::Off => "1",
+        SafeSearch::Moderate => "-1",
+        SafeSearch::Strict | SafeSearch::Level3 | SafeSearch::Level4 => "-2",
+    }
+}
+
+fn duckduckgo_time_range(time_range: TimeRange) -> &'static str {
+    match time_range {
+        TimeRange::Day => "d",
+        TimeRange::Week => "w",
+        TimeRange::Month => "m",
+        TimeRange::Year => "y",
+    }
 }
 
 fn parse_duckduckgo(body: &str, provider: Provider) -> Result<Vec<SearchResult>, String> {
@@ -287,15 +491,31 @@ fn result(
     published_date: Option<String>,
 ) -> SearchResult {
     SearchResult {
-        title: text(title.split_whitespace()),
+        title: clean_text(&title),
         url,
-        content: text(snippet.split_whitespace()),
+        content: clean_text(&snippet),
         engine: Some(provider.name().to_owned()),
         engines: vec![provider.name().to_owned()],
         category: Some(provider.category().to_owned()),
         published_date,
         score: None,
     }
+}
+
+fn clean_text(raw: &str) -> String {
+    let parsed = Html::parse_fragment(raw);
+    let extracted = parsed.root_element().text().collect::<Vec<_>>().join(" ");
+    let mut clean = String::with_capacity(extracted.len());
+    for character in extracted.chars() {
+        if character.is_control() {
+            if character.is_whitespace() {
+                clean.push(' ');
+            }
+        } else {
+            clean.push(character);
+        }
+    }
+    clean.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn text<'a>(parts: impl Iterator<Item = &'a str>) -> String {
@@ -328,7 +548,6 @@ fn dedupe_and_rank(query: &str, results: Vec<SearchResult>) -> Vec<SearchResult>
             continue;
         };
         result.url = key.clone();
-        result.score = Some(relevance(query, &result));
         if let Some(existing) = merged.get_mut(&key) {
             for engine in result.engines {
                 if !existing.engines.contains(&engine) {
@@ -341,17 +560,12 @@ fn dedupe_and_rank(query: &str, results: Vec<SearchResult>) -> Vec<SearchResult>
             if existing.content.len() < result.content.len() {
                 existing.content = result.content;
             }
-            existing.score = Some(
-                existing
-                    .score
-                    .unwrap_or_default()
-                    .max(result.score.unwrap_or_default()),
-            );
         } else {
             merged.insert(key, result);
         }
     }
     let mut results = merged.into_values().collect::<Vec<_>>();
+    rank_results(query, &mut results);
     results.sort_by(|left, right| {
         right
             .score
@@ -363,27 +577,62 @@ fn dedupe_and_rank(query: &str, results: Vec<SearchResult>) -> Vec<SearchResult>
     results
 }
 
-fn relevance(query: &str, result: &SearchResult) -> f64 {
-    let terms = query
-        .split_whitespace()
-        .map(str::to_ascii_lowercase)
-        .collect::<Vec<_>>();
-    let title = result.title.to_ascii_lowercase();
-    let content = result.content.to_ascii_lowercase();
-    let url = result.url.to_ascii_lowercase();
-    let matched = terms
+fn rank_results(query: &str, results: &mut [SearchResult]) {
+    let query_terms = tokenize(query);
+    if query_terms.is_empty() || results.is_empty() {
+        return;
+    }
+    let documents = results
         .iter()
-        .filter(|term| {
-            title.contains(term.as_str())
-                || content.contains(term.as_str())
-                || url.contains(term.as_str())
+        .map(|result| {
+            tokenize(&format!(
+                "{} {} {}",
+                result.title, result.content, result.url
+            ))
+            .into_iter()
+            .collect::<HashSet<_>>()
         })
-        .count();
-    let title_matches = terms
-        .iter()
-        .filter(|term| title.contains(term.as_str()))
-        .count();
-    (matched as f64 / terms.len().max(1) as f64) + (title_matches as f64 * 0.25)
+        .collect::<Vec<_>>();
+    let document_count = documents.len() as f64;
+    let query_terms = query_terms.into_iter().collect::<HashSet<_>>();
+    for (index, result) in results.iter_mut().enumerate() {
+        let title = tokenize(&result.title);
+        let content = tokenize(&result.content);
+        let url = tokenize(&result.url);
+        let mut score = 0.0;
+        for term in &query_terms {
+            let document_frequency = documents
+                .iter()
+                .filter(|document| document.contains(term))
+                .count() as f64;
+            let inverse_document_frequency =
+                ((document_count + 1.0) / (document_frequency + 1.0)).ln() + 1.0;
+            let title_frequency = title.iter().filter(|token| *token == term).count() as f64;
+            let content_frequency = content.iter().filter(|token| *token == term).count() as f64;
+            let url_frequency = url.iter().filter(|token| *token == term).count() as f64;
+            score += inverse_document_frequency
+                * (2.0 * title_frequency / title.len().max(1) as f64
+                    + content_frequency / content.len().max(1) as f64
+                    + 0.5 * url_frequency / url.len().max(1) as f64);
+        }
+        if documents[index].is_empty() {
+            score = 0.0;
+        }
+        result.score = Some(score);
+    }
+}
+
+fn tokenize(value: &str) -> Vec<String> {
+    const STOP_WORDS: &[&str] = &[
+        "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "it", "of",
+        "on", "or", "that", "the", "this", "to", "was", "were", "with",
+    ];
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(str::to_ascii_lowercase)
+        .filter(|token| !STOP_WORDS.contains(&token.as_str()))
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -486,5 +735,75 @@ mod tests {
         assert_eq!(results[0].title, "Rust");
         assert_eq!(results[0].content, "A language");
         assert_eq!(results[0].url, "https://example.com/rust");
+    }
+
+    #[test]
+    fn parses_openalex_fixture() {
+        let results = parse_openalex(
+            r#"{"results":[{"title":"Async Rust","doi":"https://doi.org/10.1234/rust","publication_year":2026,"abstract_inverted_index":{"Rust":[1],"async":[0]}}]}"#,
+            Provider::Academic,
+        )
+        .expect("valid OpenAlex fixture");
+        assert_eq!(results[0].title, "Async Rust");
+        assert_eq!(results[0].url, "https://doi.org/10.1234/rust");
+        assert!(results[0].content.contains("async Rust"));
+    }
+
+    #[test]
+    fn parses_hacker_news_fixture_and_sanitizes_html() {
+        let results = parse_hacker_news(
+            r#"{"hits":[{"story_title":"Rust","story_url":"https://news.ycombinator.com/item?id=1","comment_text":"<p>Fast\u0007 <strong>async</strong></p>"}]}"#,
+            Provider::Discussions,
+        )
+        .expect("valid Hacker News fixture");
+        assert_eq!(results[0].title, "Rust");
+        assert_eq!(results[0].content, "Fast async");
+    }
+
+    #[test]
+    fn provider_parameters_use_native_values_and_checked_pages() {
+        let query = SearchQuery::new("rust")
+            .with_safe_search(SafeSearch::Moderate)
+            .with_time_range(TimeRange::Week)
+            .with_page(2);
+        let params = duckduckgo_params(&query).expect("valid provider params");
+        assert!(params.contains("kp=-1"));
+        assert!(params.contains("df=w"));
+        assert!(params.contains("s=10"));
+        assert!(duckduckgo_params(&SearchQuery::new("rust").with_page(u32::MAX)).is_err());
+    }
+
+    #[test]
+    fn provider_selection_honors_explicit_engines_and_mode() {
+        let query = SearchQuery::new("rust")
+            .with_engines(["openalex", "hacker-news", "duckduckgo"])
+            .with_mode(crate::SearchMode::Speed);
+        let selected = providers(&query);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].name(), "openalex");
+    }
+
+    #[test]
+    fn ranking_uses_token_frequency_and_ignores_stop_words() {
+        let results = dedupe_and_rank(
+            "rust async",
+            vec![
+                result(
+                    Provider::Web,
+                    "Rust async guide".to_owned(),
+                    "https://example.com/guide".to_owned(),
+                    "async Rust futures".to_owned(),
+                    None,
+                ),
+                result(
+                    Provider::Web,
+                    "The guide".to_owned(),
+                    "https://example.com/other".to_owned(),
+                    "A guide about programming".to_owned(),
+                    None,
+                ),
+            ],
+        );
+        assert!(results[0].score.unwrap_or_default() > results[1].score.unwrap_or_default());
     }
 }

@@ -6,10 +6,9 @@ This report separates the historical Websurfx release from the current
 in-process backend.
 
 - Historical v0.2.0: commit `1d3709c`, tag `v0.2.0`.
-- Current v0.3.1 implementation: commit `93496f7`, tag `v0.3.1`.
+- Published v0.3.1: commit `93496f7`, tag `v0.3.1`.
 - This documentation follow-up: commit `500a975`.
-- There is no v0.4.0 tag or implementation at the time of this report. This
-  report assigns no behavior to that unreleased version.
+- Current v0.4.0: the post-v0.3.1 implementation under review in this report.
 
 ## Historical v0.2.0 findings
 
@@ -61,7 +60,7 @@ That adapter, route, protocol, temporary configuration, assets, and source are
 not part of v0.3.1. The current local client calls Darash's provider adapters
 directly and does not start an HTTP listener or a subprocess.
 
-## Current v0.3.1 behavior
+## Current v0.4.0 behavior
 
 `SearchClient::local()` selects the requested providers and runs them
 concurrently:
@@ -70,37 +69,39 @@ concurrently:
 - `academic`: OpenAlex works.
 - `discussions`: Hacker News Algolia results.
 
-Each provider requests up to 10 results. Darash accepts successful provider
-results, drops a provider error if another selected provider succeeds, and
-returns `Error::Local` containing joined provider errors when all selected
-providers fail. Successful local responses do not include per-provider error
-metadata, backend answers, corrections, or suggestions.
+Each provider requests up to 10 results in balanced and quality modes, or up to
+5 in speed mode. Darash accepts successful provider results and records each
+provider outcome in `SearchResponse.provider_status`; if every selected provider
+fails it returns `Error::Local` containing the provider errors. Local responses
+do not provide backend answers, corrections, or suggestions.
 
 Results are normalized to title, URL, `content`, provider fields, category,
 publication date, and score. Only HTTP and HTTPS result URLs are retained;
 fragments are removed. Duplicate URLs are merged, provider names are merged,
-and results are deterministically ranked by query-term matches in title,
-content, and URL, with title matches weighted higher.
+and results are deterministically ranked with tokenized TF-IDF-style weighting
+across title, content, and URL.
 
-`SearchMode` truncates `results` and `sources` to 5 (`speed`), 10
-(`balanced`), or 20 (`quality`). `number_of_results` is not changed by this
-truncation. `SafeSearch` maps to SearxNG values 0, 1, and 2; local mode passes
-it to DuckDuckGo, while OpenAlex and Hacker News do not apply it. There is no
-allowlist, blocklist, or persistent result cache in Darash. Remote cache
-behavior belongs to the configured SearxNG service.
+`SearchMode` controls provider selection and retrieval as well as truncating
+`results` and `sources` to 5 (`speed`), 10 (`balanced`), or 20 (`quality`).
+`SafeSearch` supports levels 0 through 4, with provider-specific DuckDuckGo
+parameter mappings and optional level-3/4 allowlist/blocklist filtering.
+`SearchFilters` reports the applied level and filtering state. Darash also has a
+bounded in-memory TTL cache configurable through `SearchConfig`.
 
 Remote clients retain the SearxNG-compatible `/search?format=json` request
 path, a 15-second default timeout, a 256 KiB response cap, disabled redirects,
 and endpoint validation that rejects non-HTTP(S) schemes and embedded
 credentials.
 
-The v0.3.1 verification set passed 15 library tests, 2 CLI tests, formatting,
-build, Clippy, package verification, and the no-Websurfx dependency check.
+The v0.4.0 verification set currently passes 33 library tests, 2 CLI tests,
+5 integration tests, formatting, build, Clippy, and the no-Websurfx dependency
+check.
 
-## v0.4.0 follow-up
+## v0.4.0 release follow-up
 
-v0.4.0 is not released and has no implementation to audit. Before assigning
-new behavior to that version, rerun the dependency graph check, package
-verification, advisory scan, provider fixture tests, and live local-provider
-smoke tests. Any future cache, provider-error metadata, terminal-safe output,
-or endpoint policy must be documented only after it is implemented and tested.
+The v0.4.0 implementation after v0.3.1 adds provider status metadata, native provider
+parameter mapping, checked pagination, tokenized ranking, HTML/control-text
+sanitization, configurable filtering, a bounded TTL cache, and dependency-free
+Websurfx response/query adapters. These changes require the v0.4.0 tag and
+package release. Re-run the dependency graph check, package verification,
+advisory scan, and live provider smoke tests before publishing.
