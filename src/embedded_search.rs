@@ -112,17 +112,20 @@ async fn fetch_web(
     provider: Provider,
     query: &SearchQuery,
 ) -> Result<Vec<SearchResult>, String> {
-    let mut serializer = form_urlencoded::Serializer::new(String::new());
-    serializer.append_pair("q", query.query());
-    serializer.append_pair(
-        "s",
-        &((query.page.unwrap_or(1) - 1) * RESULTS_PER_PROVIDER as u32).to_string(),
-    );
-    serializer.append_pair("kp", query.safe_search.unwrap_or_default().value());
-    if let Some(time_range) = query.time_range {
-        serializer.append_pair("df", time_range.value());
-    }
-    let url = format!("{DUCKDUCKGO_ENDPOINT}?{}", serializer.finish());
+    let params = {
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        serializer.append_pair("q", query.query());
+        serializer.append_pair(
+            "s",
+            &((query.page.unwrap_or(1) - 1) * RESULTS_PER_PROVIDER as u32).to_string(),
+        );
+        serializer.append_pair("kp", query.safe_search.unwrap_or_default().value());
+        if let Some(time_range) = query.time_range {
+            serializer.append_pair("df", time_range.value());
+        }
+        serializer.finish()
+    };
+    let url = format!("{DUCKDUCKGO_ENDPOINT}?{params}");
     let body = get_body(client, &url).await?;
     parse_duckduckgo(&body, provider)
 }
@@ -132,11 +135,14 @@ async fn fetch_openalex(
     provider: Provider,
     query: &SearchQuery,
 ) -> Result<Vec<SearchResult>, String> {
-    let mut serializer = form_urlencoded::Serializer::new(String::new());
-    serializer.append_pair("search", query.query());
-    serializer.append_pair("per-page", &RESULTS_PER_PROVIDER.to_string());
-    serializer.append_pair("page", &query.page.unwrap_or(1).to_string());
-    let url = format!("{OPENALEX_ENDPOINT}?{}", serializer.finish());
+    let params = {
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        serializer.append_pair("search", query.query());
+        serializer.append_pair("per-page", &RESULTS_PER_PROVIDER.to_string());
+        serializer.append_pair("page", &query.page.unwrap_or(1).to_string());
+        serializer.finish()
+    };
+    let url = format!("{OPENALEX_ENDPOINT}?{params}");
     let body = get_body(client, &url).await?;
     let response: OpenAlexResponse =
         serde_json::from_str(&body).map_err(|error| error.to_string())?;
@@ -174,11 +180,14 @@ async fn fetch_hacker_news(
     provider: Provider,
     query: &SearchQuery,
 ) -> Result<Vec<SearchResult>, String> {
-    let mut serializer = form_urlencoded::Serializer::new(String::new());
-    serializer.append_pair("query", query.query());
-    serializer.append_pair("hitsPerPage", &RESULTS_PER_PROVIDER.to_string());
-    serializer.append_pair("page", &(query.page.unwrap_or(1) - 1).to_string());
-    let url = format!("{HACKER_NEWS_ENDPOINT}?{}", serializer.finish());
+    let params = {
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        serializer.append_pair("query", query.query());
+        serializer.append_pair("hitsPerPage", &RESULTS_PER_PROVIDER.to_string());
+        serializer.append_pair("page", &(query.page.unwrap_or(1) - 1).to_string());
+        serializer.finish()
+    };
+    let url = format!("{HACKER_NEWS_ENDPOINT}?{params}");
     let body = get_body(client, &url).await?;
     let response: HackerNewsResponse =
         serde_json::from_str(&body).map_err(|error| error.to_string())?;

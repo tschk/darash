@@ -706,6 +706,15 @@ mod tests {
     }
 
     #[test]
+    fn local_search_future_is_send() {
+        fn assert_send<T: Send>(_: T) {}
+
+        let client = SearchClient::local().expect("local backend");
+        let query = SearchQuery::new("rust");
+        assert_send(client.search(&query));
+    }
+
+    #[test]
     fn response_parses_and_projects_citations() {
         let response: SearchResponse = serde_json::from_str(
             r#"{

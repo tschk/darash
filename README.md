@@ -30,7 +30,7 @@ Add Darash from crates.io:
 
 ```toml
 [dependencies]
-darash = "0.3.0"
+darash = "0.3.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
