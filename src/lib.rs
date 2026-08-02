@@ -91,6 +91,14 @@ impl SearchMode {
             Self::Quality => "quality",
         }
     }
+
+    fn result_limit(self) -> usize {
+        match self {
+            Self::Speed => 5,
+            Self::Balanced => 10,
+            Self::Quality => 20,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -341,7 +349,9 @@ impl SearchClient {
     }
 
     pub async fn search_request(&self, request: &SearchRequest) -> Result<SearchResponse, Error> {
-        self.search(&request.search_query()).await
+        let mut response = self.search(&request.search_query()).await?;
+        limit_response(&mut response, request.mode);
+        Ok(response)
     }
 
     fn search_url(&self) -> Url {
@@ -357,6 +367,12 @@ impl SearchClient {
         url.set_path(&path);
         url
     }
+}
+
+fn limit_response(response: &mut SearchResponse, mode: SearchMode) {
+    let limit = mode.result_limit();
+    response.results.truncate(limit);
+    response.sources.truncate(limit);
 }
 
 async fn read_response_body(response: reqwest::Response) -> Result<String, Error> {
@@ -500,6 +516,50 @@ mod tests {
             request.search_query().to_query_string(),
             "q=rust+async&format=json&categories=science%2Csocial+media"
         );
+    }
+
+    #[test]
+    fn mode_limits_results_without_replacing_backend_sources() {
+        let source = Citation {
+            title: "Backend source".to_owned(),
+            url: "https://example.com".to_owned(),
+            snippet: "source".to_owned(),
+            source: None,
+            published_date: None,
+        };
+        let response = |count| SearchResponse {
+            query: "rust".to_owned(),
+            number_of_results: count,
+            results: (0..count)
+                .map(|index| SearchResult {
+                    title: index.to_string(),
+                    url: format!("https://example.com/{index}"),
+                    content: String::new(),
+                    engine: None,
+                    engines: Vec::new(),
+                    category: None,
+                    published_date: None,
+                    score: None,
+                })
+                .collect(),
+            answers: Vec::new(),
+            answer: None,
+            sources: vec![source.clone(); count as usize],
+            corrections: Vec::new(),
+            suggestions: Vec::new(),
+        };
+
+        for (mode, limit) in [
+            (SearchMode::Speed, 5),
+            (SearchMode::Balanced, 10),
+            (SearchMode::Quality, 20),
+        ] {
+            let mut response = response(25);
+            limit_response(&mut response, mode);
+            assert_eq!(response.results.len(), limit);
+            assert_eq!(response.sources.len(), limit);
+            assert_eq!(response.sources[0], source);
+        }
     }
 
     #[test]
