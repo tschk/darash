@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
+use serde::{de::Deserializer, Deserialize, Serialize};
 use thiserror::Error;
 use url::{form_urlencoded, Url};
 
-mod embedded_websurfx;
+mod embedded_search;
 
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:8080";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -313,7 +313,7 @@ impl SearchConfig {
 pub struct SearchClient {
     http: reqwest::Client,
     config: SearchConfig,
-    embedded_websurfx: bool,
+    embedded: bool,
 }
 
 impl SearchClient {
@@ -322,9 +322,8 @@ impl SearchClient {
     }
 
     pub fn local() -> Result<Self, Error> {
-        let endpoint = embedded_websurfx::endpoint()?;
-        let mut client = Self::from_config(SearchConfig::new(endpoint.as_str())?)?;
-        client.embedded_websurfx = true;
+        let mut client = Self::from_config(SearchConfig::new(DEFAULT_ENDPOINT)?)?;
+        client.embedded = true;
         Ok(client)
     }
 
@@ -340,7 +339,7 @@ impl SearchClient {
         Ok(Self {
             http,
             config,
-            embedded_websurfx: false,
+            embedded: false,
         })
     }
 
@@ -356,24 +355,22 @@ impl SearchClient {
             return Err(Error::InvalidPage);
         }
 
+        if self.embedded {
+            return embedded_search::search(&self.http, query).await;
+        }
+
         let mut url = self.search_url();
-        let query_string = if self.embedded_websurfx {
-            format!("{}&json=true", query.to_query_string())
-        } else {
-            query.to_query_string()
-        };
-        url.set_query(Some(&query_string));
+        url.set_query(Some(&query.to_query_string()));
         let response = self.http.get(url).send().await.map_err(Error::Request)?;
         let status = response.status();
         let body = read_response_body(response).await?;
         if !status.is_success() {
             return Err(Error::HttpStatus { status, body });
         }
-        let mut response: SearchResponse = match serde_json::from_str(&body) {
-            Ok(response) => response,
-            Err(error) => embedded_websurfx::parse_response(query.query(), &body)
-                .map_err(|_| Error::Decode(error))?,
-        };
+        let mut response: SearchResponse = serde_json::from_str(&body).map_err(Error::Decode)?;
+        if response.number_of_results == 0 {
+            response.number_of_results = response.results.len() as u64;
+        }
         if response.answer.is_none() {
             response.answer = response.answers.first().cloned();
         }
@@ -438,7 +435,7 @@ pub struct SearchResponse {
     pub number_of_results: u64,
     #[serde(default)]
     pub results: Vec<SearchResult>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_answers")]
     pub answers: Vec<String>,
     #[serde(default)]
     pub answer: Option<String>,
@@ -469,6 +466,7 @@ pub struct SearchResult {
     #[serde(default)]
     pub title: String,
     #[serde(default)]
+    #[serde(deserialize_with = "deserialize_string_or_empty")]
     pub url: String,
     #[serde(default)]
     pub content: String,
@@ -482,6 +480,42 @@ pub struct SearchResult {
     pub published_date: Option<String>,
     #[serde(default)]
     pub score: Option<f64>,
+}
+
+fn deserialize_string_or_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(|value| value.unwrap_or_default())
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawAnswer {
+    Text(String),
+    Object {
+        answer: Option<String>,
+        content: Option<String>,
+        text: Option<String>,
+    },
+}
+
+fn deserialize_answers<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let answers = Option::<Vec<RawAnswer>>::deserialize(deserializer)?.unwrap_or_default();
+    Ok(answers
+        .into_iter()
+        .filter_map(|answer| match answer {
+            RawAnswer::Text(text) => Some(text),
+            RawAnswer::Object {
+                answer,
+                content,
+                text,
+            } => answer.or(content).or(text),
+        })
+        .collect())
 }
 
 impl SearchResult {
@@ -530,8 +564,8 @@ pub enum Error {
     InvalidResponseEncoding(String),
     #[error("invalid search response: {0}")]
     Decode(#[source] serde_json::Error),
-    #[error("failed to start embedded Websurfx: {0}")]
-    Embedded(String),
+    #[error("embedded search failed: {0}")]
+    Local(String),
 }
 
 #[cfg(test)]
@@ -662,6 +696,16 @@ mod tests {
     }
 
     #[test]
+    fn local_client_selects_direct_backend() {
+        let client = SearchClient::local().expect("local backend");
+        assert!(client.embedded);
+        assert_eq!(
+            client.config.endpoint().as_str(),
+            format!("{DEFAULT_ENDPOINT}/")
+        );
+    }
+
+    #[test]
     fn response_parses_and_projects_citations() {
         let response: SearchResponse = serde_json::from_str(
             r#"{
@@ -697,6 +741,20 @@ mod tests {
                 published_date: Some("2026-01-02".to_owned()),
             }]
         );
+    }
+
+    #[test]
+    fn response_accepts_answer_objects_and_null_urls() {
+        let response: SearchResponse = serde_json::from_str(
+            r#"{
+                "answers": [{"answer":"Async Rust uses futures."}],
+                "results": [{"title":"Rust","url":null,"content":"A guide."}]
+            }"#,
+        )
+        .expect("compatible SearxNG response");
+
+        assert_eq!(response.answers, ["Async Rust uses futures."]);
+        assert_eq!(response.results[0].url, "");
     }
 
     #[tokio::test]

@@ -1,9 +1,9 @@
 # Darash
 
-Darash is a provider-neutral async Rust search client with an in-process
-[Websurfx](https://github.com/tschk/websurfx) backend by default. It can also
-query a remote [SearxNG](https://docs.searxng.org/) endpoint, bounds response
-sizes, and projects results into citations without requiring an API key.
+Darash is a provider-neutral async Rust search client with a small in-process
+multi-source backend by default. It can also query a remote
+[SearxNG](https://docs.searxng.org/) endpoint, bounds response sizes, and
+projects results into citations without requiring an API key.
 
 ## External SearxNG
 
@@ -30,7 +30,7 @@ Add Darash from crates.io:
 
 ```toml
 [dependencies]
-darash = "0.2.0"
+darash = "0.3.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -84,9 +84,10 @@ async fn main() -> Result<(), darash::Error> {
 }
 ```
 
-`SearchClient::local()` starts Websurfx inside the current process on an
-ephemeral loopback listener and adapts its JSON result model to Darash. The
-host does not need a separate search service. `SearchMode` supports `Speed`, `Balanced` (the default), and `Quality`.
+`SearchClient::local()` runs Darash's provider adapters directly in the current
+process. The default backend queries DuckDuckGo, OpenAlex, and Hacker News as
+needed; it does not start a separate search service. `SearchMode` supports
+`Speed`, `Balanced` (the default), and `Quality`.
 `SearchSource` supports `Web` (the default), `Academic`, and `Discussions`.
 JSON requests may omit `mode` and `sources`; they default to `balanced` and
 `web`.
@@ -94,8 +95,8 @@ The host can synthesize an answer from the returned sources with its own model.
 
 ## CLI
 
-The native CLI starts in-process Websurfx by default. Pass `--url` only when
-using another SearxNG-compatible endpoint:
+The native CLI starts the in-process Darash backend by default. Pass `--url`
+only when using another SearxNG-compatible endpoint:
 
 ```sh
 cargo run -- search "rust async"
@@ -142,4 +143,4 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo package --locked
 ```
 
-Darash is licensed under AGPL-3.0.
+Darash is licensed under the ISC license.

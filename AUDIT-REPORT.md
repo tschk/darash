@@ -173,3 +173,15 @@ cargo package --locked
 
 `cargo audit` completed with the 9 vulnerabilities and 18 allowed warnings
 described in DARASH-002. The working tree was clean before adding this report.
+
+## Follow-up replacement
+
+The AGPL Websurfx backend is being removed in the ISC migration. The
+replacement is an independent in-process provider adapter that preserves the
+public Darash request and response types while querying only the providers
+needed by Darash. Websurfx source, assets, configuration, selectors, tests,
+and dependency tree are not part of the replacement.
+
+The published `v0.2.0` package remains AGPL-3.0. The ISC metadata and backend
+apply only to the new release after the dependency graph and quality gates are
+verified.

@@ -138,7 +138,7 @@ fn usage() -> &'static str {
 
 fn print_usage() {
     eprintln!(
-        "{} (default: in-process Websurfx; --url selects an external endpoint)",
+        "{} (default: in-process Darash search; --url selects an external endpoint)",
         usage()
     );
 }
