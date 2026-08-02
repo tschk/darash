@@ -6,8 +6,8 @@ This report separates the historical Websurfx release from the current
 in-process backend.
 
 - Historical v0.2.0: commit `1d3709c`, tag `v0.2.0`.
-- Current v0.3.1: commit `93496f7`, tag `v0.3.1`, and `origin/main` at the time
-  of this report.
+- Current v0.3.1 implementation: commit `93496f7`, tag `v0.3.1`.
+- This documentation follow-up: commit `500a975`.
 - There is no v0.4.0 tag or implementation at the time of this report. This
   report assigns no behavior to that unreleased version.
 
