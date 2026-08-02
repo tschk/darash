@@ -1,8 +1,6 @@
 use std::env;
 
-use darash::{
-    SearchClient, SearchMode, SearchRequest, SearchResponse, SearchSource, DEFAULT_ENDPOINT,
-};
+use darash::{SearchClient, SearchMode, SearchRequest, SearchResponse, SearchSource};
 
 struct CliArgs {
     query: String,
@@ -139,7 +137,10 @@ fn usage() -> &'static str {
 }
 
 fn print_usage() {
-    eprintln!("{} (default endpoint: {DEFAULT_ENDPOINT})", usage());
+    eprintln!(
+        "{} (default: in-process Websurfx; --url selects an external endpoint)",
+        usage()
+    );
 }
 
 #[cfg(test)]

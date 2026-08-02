@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::{form_urlencoded, Url};
 
+mod embedded_websurfx;
+
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:8080";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
@@ -311,6 +313,7 @@ impl SearchConfig {
 pub struct SearchClient {
     http: reqwest::Client,
     config: SearchConfig,
+    embedded_websurfx: bool,
 }
 
 impl SearchClient {
@@ -319,7 +322,10 @@ impl SearchClient {
     }
 
     pub fn local() -> Result<Self, Error> {
-        Self::new(DEFAULT_ENDPOINT)
+        let endpoint = embedded_websurfx::endpoint()?;
+        let mut client = Self::from_config(SearchConfig::new(endpoint.as_str())?)?;
+        client.embedded_websurfx = true;
+        Ok(client)
     }
 
     pub fn from_config(config: SearchConfig) -> Result<Self, Error> {
@@ -331,7 +337,11 @@ impl SearchClient {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(Error::ClientBuild)?;
-        Ok(Self { http, config })
+        Ok(Self {
+            http,
+            config,
+            embedded_websurfx: false,
+        })
     }
 
     pub fn config(&self) -> &SearchConfig {
@@ -347,14 +357,23 @@ impl SearchClient {
         }
 
         let mut url = self.search_url();
-        url.set_query(Some(&query.to_query_string()));
+        let query_string = if self.embedded_websurfx {
+            format!("{}&json=true", query.to_query_string())
+        } else {
+            query.to_query_string()
+        };
+        url.set_query(Some(&query_string));
         let response = self.http.get(url).send().await.map_err(Error::Request)?;
         let status = response.status();
         let body = read_response_body(response).await?;
         if !status.is_success() {
             return Err(Error::HttpStatus { status, body });
         }
-        let mut response: SearchResponse = serde_json::from_str(&body).map_err(Error::Decode)?;
+        let mut response: SearchResponse = match serde_json::from_str(&body) {
+            Ok(response) => response,
+            Err(error) => embedded_websurfx::parse_response(query.query(), &body)
+                .map_err(|_| Error::Decode(error))?,
+        };
         if response.answer.is_none() {
             response.answer = response.answers.first().cloned();
         }
@@ -511,6 +530,8 @@ pub enum Error {
     InvalidResponseEncoding(String),
     #[error("invalid search response: {0}")]
     Decode(#[source] serde_json::Error),
+    #[error("failed to start embedded Websurfx: {0}")]
+    Embedded(String),
 }
 
 #[cfg(test)]

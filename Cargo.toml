@@ -1,9 +1,9 @@
 [package]
 name = "darash"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
-license = "MPL-2.0"
-description = "Provider-neutral async client for SearxNG-compatible local search"
+license = "AGPL-3.0"
+description = "Provider-neutral async client with embedded Websurfx and SearxNG support"
 repository = "https://github.com/tschk/darash"
 keywords = ["search", "searxng", "http", "async"]
 categories = ["api-bindings", "web-programming::http-client"]
@@ -14,5 +14,6 @@ futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+websurfx = { version = "1.29.9", git = "https://github.com/tschk/websurfx", rev = "b8594b3", default-features = false }
 url = "2"
