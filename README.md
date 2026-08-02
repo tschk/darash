@@ -62,7 +62,7 @@ async fn main() -> Result<(), darash::Error> {
 answers, corrections, and suggestions. Its optional `answer` is a backend
 answer when one is supplied; Darash does not call an AI provider. `sources` and
 `cited_sources()` expose the cited `Citation` values for host-owned synthesis.
-Each `SearchResult` includes its title, URL, snippet, engines, category,
+Each `SearchResult` includes its title, URL, content, engines, category,
 publication date, and score.
 
 The Vane-compatible request contract carries a search mode and source selection
@@ -92,6 +92,37 @@ needed; it does not start a separate search service. `SearchMode` supports
 JSON requests may omit `mode` and `sources`; they default to `balanced` and
 `web`.
 The host can synthesize an answer from the returned sources with its own model.
+
+The local providers are selected from the requested sources and run
+concurrently:
+
+- `web` queries DuckDuckGo HTML results.
+- `academic` queries OpenAlex works.
+- `discussions` queries Hacker News Algolia results.
+
+Each provider contributes up to 10 results before URL deduplication and
+relevance ranking. A provider failure is ignored when another selected
+provider returns results. If every selected provider fails, the call returns
+`Error::Local` with the provider errors; successful responses do not carry
+per-provider failure metadata. Local responses do not provide backend answers,
+corrections, or suggestions.
+
+`SearchMode` caps the returned `results` and `sources` at 5 (`speed`), 10
+(`balanced`), or 20 (`quality`). `number_of_results` is not changed by that
+cap: the local backend reports its deduplicated count, while a remote SearxNG
+backend reports its count or falls back to the decoded result count when the
+field is absent.
+
+`SafeSearch::Off`, `Moderate`, and `Strict` map to SearxNG `safesearch` values
+0, 1, and 2. In local mode the value is passed to DuckDuckGo; OpenAlex and
+Hacker News do not apply it. Darash has no allowlist, blocklist, or persistent
+result cache; remote caching remains a property of the configured SearxNG
+service.
+
+The local backend is a direct in-process adapter. It does not start an HTTP
+listener, expose a Websurfx route or protocol, spawn a search subprocess, or
+read Websurfx configuration or assets. The Websurfx adapter that shipped in
+Darash 0.2.0 is not part of the 0.3.x releases.
 
 ## CLI
 

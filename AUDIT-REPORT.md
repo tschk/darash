@@ -2,186 +2,105 @@
 
 ## Scope
 
-This report records the parallel audit performed against commit `1f37a83`
-(`v0.1.1`) and the follow-up verification at current `main`:
+This report separates the historical Websurfx release from the current
+in-process backend.
 
-- Current HEAD: `1d3709c` (`v0.2.0`), also `origin/main`.
-- Working tree: clean before this report was added.
-- Post-audit changes: embedded Websurfx, dependency updates, and the AGPL-3.0
-  license change.
-- The post-audit implementation changes were checked for build and test
-  health, but they need a dedicated security review before release.
+- Historical v0.2.0: commit `1d3709c`, tag `v0.2.0`.
+- Current v0.3.1: commit `93496f7`, tag `v0.3.1`, and `origin/main` at the time
+  of this report.
+- There is no v0.4.0 tag or implementation at the time of this report. This
+  report assigns no behavior to that unreleased version.
 
-## Executive summary
+## Historical v0.2.0 findings
 
-The original client audit found one high-impact response compatibility bug,
-several medium API and trust-boundary risks, and CI/test coverage gaps. The
-Websurfx integration adds a more urgent supply-chain concern: `cargo audit`
-now reports 9 vulnerabilities and 18 allowed warnings through `websurfx`
-1.29.9's legacy dependency tree.
+The following findings described the v0.2.0 Websurfx integration and are not
+claims about the current dependency graph or backend.
 
-## Findings
+### Resolved in v0.3.1
 
-### High
+- DARASH-001: answer-bearing SearxNG responses could fail decoding. The current
+  `answers` deserializer accepts text and common answer-object shapes.
+- DARASH-002: Websurfx introduced a large legacy dependency tree and reported
+  advisories. Websurfx and its dependency tree were removed in v0.3.1.
+- DARASH-003: a missing SearxNG result count could be reported as zero. Remote
+  responses now derive the count from decoded results when the field is absent;
+  local responses report their deduplicated count before mode truncation.
+- DARASH-004: nullable SearxNG URLs could fail decoding. The current response
+  model maps a null URL to an empty string.
+- DARASH-005: documentation called the result body `snippet` even though the
+  public `SearchResult` field is `content`. Current documentation uses
+  `content`; `Citation` continues to expose `snippet`.
+- DARASH-006: mode truncation was undocumented. Current documentation records
+  the 5, 10, and 20 result/source limits for speed, balanced, and quality.
+- DARASH-008: v0.2.0 changed the package metadata to AGPL-3.0 with the
+  Websurfx integration. v0.3.1 is ISC and no longer links Websurfx. The
+  already-published v0.2.0 artifact remains unchanged.
 
-#### DARASH-001: Answer-bearing SearxNG responses fail decoding
+### Still open or intentionally bounded
 
-`SearchResponse.answers` is `Vec<String>`, but current SearxNG JSON emits
-answer objects. A response containing an answer therefore returns
-`Error::Decode` instead of search results. The fallback at
-`src/lib.rs:374-375` still routes the malformed SearxNG body through the
-Websurfx parser and preserves the decode failure.
+- DARASH-007: `SearchConfig` accepts any HTTP or HTTPS endpoint. Callers that
+  pass an untrusted endpoint still need their own allowlist or network policy.
+- DARASH-009: the CLI prints titles, URLs, content, and backend error bodies
+  without terminal escaping. Structured output remains a future improvement.
+- DARASH-010: CI runs formatting, build, test, and Clippy, but does not run
+  package verification or an advisory scan. Workflow action revisions are also
+  not pinned to immutable commits.
+- DARASH-011: the current tests cover response compatibility, limits, URL
+  normalization, provider fixture parsing, local-client selection, CLI parsing,
+  and the direct-search future's `Send` bound. Live provider failures and
+  network cancellation remain opt-in rather than deterministic CI tests.
 
-Locations: `src/lib.rs:423`, `src/lib.rs:372-375`.
+## Websurfx adapter history
 
-Remediation: model the SearxNG answer object or use a deliberate untagged
-compatibility type, then add an object-shaped fixture test.
+In v0.2.0, `SearchClient::local()` started Websurfx in the current process on
+an ephemeral loopback listener. Darash queried its `/search` route with the
+SearxNG-style query plus `json=true`, then mapped Websurfx's camelCase JSON
+fields, including `relevanceScore`, into `SearchResponse`.
 
-#### DARASH-002: Vulnerable legacy dependency tree introduced by Websurfx
+That adapter, route, protocol, temporary configuration, assets, and source are
+not part of v0.3.1. The current local client calls Darash's provider adapters
+directly and does not start an HTTP listener or a subprocess.
 
-`cargo audit` at `1d3709c` reports 9 vulnerabilities, including critical
-advisories for `hyper 0.12.36` and `failure 0.1.8`, plus unsound and
-unmaintained legacy crates. The dependency path is primarily
-`websurfx 1.29.9 -> fake-useragent -> reqwest 0.9.24`.
+## Current v0.3.1 behavior
 
-Location: `Cargo.toml:18`, `Cargo.lock`.
+`SearchClient::local()` selects the requested providers and runs them
+concurrently:
 
-Remediation: upgrade or replace the embedded backend with a dependency tree
-that has no unresolved advisories; do not ship the embedded backend while
-critical/unsound advisories remain accepted.
+- `web`: DuckDuckGo HTML results.
+- `academic`: OpenAlex works.
+- `discussions`: Hacker News Algolia results.
 
-### Medium
+Each provider requests up to 10 results. Darash accepts successful provider
+results, drops a provider error if another selected provider succeeds, and
+returns `Error::Local` containing joined provider errors when all selected
+providers fail. Successful local responses do not include per-provider error
+metadata, backend answers, corrections, or suggestions.
 
-#### DARASH-003: Stock SearxNG result count is silently reported as zero
+Results are normalized to title, URL, `content`, provider fields, category,
+publication date, and score. Only HTTP and HTTPS result URLs are retained;
+fragments are removed. Duplicate URLs are merged, provider names are merged,
+and results are deterministically ranked by query-term matches in title,
+content, and URL, with title matches weighted higher.
 
-`number_of_results` defaults to zero, while current SearxNG JSON does not
-emit that field. Callers can receive results with a misleading count.
+`SearchMode` truncates `results` and `sources` to 5 (`speed`), 10
+(`balanced`), or 20 (`quality`). `number_of_results` is not changed by this
+truncation. `SafeSearch` maps to SearxNG values 0, 1, and 2; local mode passes
+it to DuckDuckGo, while OpenAlex and Hacker News do not apply it. There is no
+allowlist, blocklist, or persistent result cache in Darash. Remote cache
+behavior belongs to the configured SearxNG service.
 
-Location: `src/lib.rs:419`.
+Remote clients retain the SearxNG-compatible `/search?format=json` request
+path, a 15-second default timeout, a 256 KiB response cap, disabled redirects,
+and endpoint validation that rejects non-HTTP(S) schemes and embedded
+credentials.
 
-Remediation: derive the count when absent, or distinguish backend count from
-the locally returned result count.
+The v0.3.1 verification set passed 15 library tests, 2 CLI tests, formatting,
+build, Clippy, package verification, and the no-Websurfx dependency check.
 
-#### DARASH-004: Nullable SearxNG URLs fail response decoding
+## v0.4.0 follow-up
 
-SearxNG permits `url: null`, but `SearchResult.url` is a `String`. A result
-with an explicit null URL makes the entire response fail decoding.
-
-Location: `src/lib.rs:453`.
-
-Remediation: use `Option<String>` or a documented null-to-empty conversion,
-with a fixture test.
-
-#### DARASH-005: Public API and README disagree on `snippet`
-
-The README says `SearchResult` exposes `snippet`, while the public struct
-exposes `content`; only `Citation` has `snippet`.
-
-Locations: `README.md:65`, `src/lib.rs:449-466`.
-
-Remediation: document `content`, or rename the public field in a deliberate
-breaking API release.
-
-#### DARASH-006: Mode truncation is undocumented
-
-`search_request` truncates results and sources to 5, 10, or 20 items by mode,
-while `number_of_results` remains the backend count.
-
-Locations: `src/lib.rs:95-100`, `src/lib.rs:386-389`.
-
-Remediation: document the limits and count semantics, or expose an explicit
-unlimited/raw search path.
-
-#### DARASH-007: Conditional SSRF through caller-controlled endpoints
-
-`SearchConfig` accepts any HTTP or HTTPS host, including private and link-local
-addresses. This is a risk when an embedding service forwards an untrusted
-endpoint to `SearchClient::new` or the CLI's `--url` option.
-
-Locations: `src/lib.rs:273-291`, `src/bin/darash.rs:84-86`.
-
-Remediation: keep local mode explicit and add an optional caller policy or
-allowlist when endpoints come from untrusted input.
-
-#### DARASH-008: License changed from MPL-2.0 to AGPL-3.0
-
-The `v0.2.0` package changes its declared license and README license without
-a migration note. This can materially change downstream redistribution and
-integration obligations.
-
-Locations: `Cargo.toml:3-6`, `README.md:145`.
-
-Remediation: confirm the intended licensing decision and call it out in the
-release notes before publishing the new major-compatibility contract.
-
-### Low / process
-
-#### DARASH-009: Raw backend data is written to terminals and logs
-
-Answers, titles, URLs, snippets, and HTTP error bodies are printed verbatim.
-Control characters can affect terminals, and an error body up to 256 KiB can
-be emitted to stderr.
-
-Locations: `src/bin/darash.rs:123-134`, `src/lib.rs:394-411`,
-`src/lib.rs:506-507`.
-
-Remediation: provide structured output or escape terminal data; keep raw
-error bodies out of the default `Display` implementation.
-
-#### DARASH-010: CI omits documented package and security gates
-
-The README lists `cargo package --locked`, but CI does not run it. CI also
-does not run `cargo audit`, and its GitHub Actions use mutable tags.
-
-Locations: `.github/workflows/ci.yml:13-20`, `README.md:131-141`.
-
-Remediation: add package and advisory checks, and pin action revisions if
-reproducible CI is required.
-
-#### DARASH-011: Test coverage misses important failure paths
-
-Tests do not cover answer objects, null URLs, oversized or invalid bodies,
-redirects, invalid endpoints, most CLI failures, or embedded-server startup
-failure.
-
-Locations: `src/lib.rs:550-730`, `src/bin/darash.rs:145-179`.
-
-Remediation: add the smallest fixtures that fail for each supported response
-contract and trust boundary.
-
-## Simplification candidates
-
-These are optional maintenance cuts, not release blockers:
-
-- Replace `futures-util` streaming with `reqwest::Response::chunk()` and drop
-  the direct dependency and `stream` feature.
-- Remove unused one-source and string helper methods only if preserving the
-  published public API is not required.
-- Inline the single-use CLI usage helper.
-
-## Verification
-
-At current HEAD, these commands passed:
-
-```text
-cargo fmt --all -- --check
-cargo build --locked
-cargo test --locked      # 12 tests passed
-cargo clippy --all-targets --all-features -- -D warnings
-cargo package --locked
-```
-
-`cargo audit` completed with the 9 vulnerabilities and 18 allowed warnings
-described in DARASH-002. The working tree was clean before adding this report.
-
-## Follow-up replacement
-
-The AGPL Websurfx backend is being removed in the ISC migration. The
-replacement is an independent in-process provider adapter that preserves the
-public Darash request and response types while querying only the providers
-needed by Darash. Websurfx source, assets, configuration, selectors, tests,
-and dependency tree are not part of the replacement.
-
-The published `v0.2.0` package remains AGPL-3.0. The ISC metadata and backend
-apply only to the new release after the dependency graph and quality gates are
-verified.
+v0.4.0 is not released and has no implementation to audit. Before assigning
+new behavior to that version, rerun the dependency graph check, package
+verification, advisory scan, provider fixture tests, and live local-provider
+smoke tests. Any future cache, provider-error metadata, terminal-safe output,
+or endpoint policy must be documented only after it is implemented and tested.
