@@ -334,7 +334,9 @@ impl SearchClient {
         if response.answer.is_none() {
             response.answer = response.answers.first().cloned();
         }
-        response.sources = response.citations();
+        if response.sources.is_empty() {
+            response.sources = response.citations();
+        }
         Ok(response)
     }
 
