@@ -1,0 +1,103 @@
+# Darash
+
+Darash is a provider-neutral async Rust client for a local or remote
+[SearxNG](https://docs.searxng.org/) instance. It builds SearxNG JSON search
+requests, bounds response sizes, and projects results into citations without
+requiring an API key.
+
+## Local SearxNG
+
+The official SearxNG Docker Compose setup is the quickest local instance. It
+requires Docker with Compose:
+
+```sh
+mkdir -p searxng/core-config
+cd searxng
+curl -fsSL \
+  -O https://raw.githubusercontent.com/searxng/searxng/master/container/docker-compose.yml \
+  -O https://raw.githubusercontent.com/searxng/searxng/master/container/.env.example
+cp .env.example .env
+docker compose up -d
+```
+
+SearxNG is then available at `http://localhost:8080`. Stop it with
+`docker compose down`. See the [SearxNG container documentation](https://docs.searxng.org/admin/installation-docker.html)
+for configuration and maintenance.
+
+## Use the crate
+
+Darash is not yet published on crates.io. Depend on the public repository for
+now:
+
+```toml
+[dependencies]
+darash = { git = "https://github.com/tschk/darash", branch = "main" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+Create a client, build a query, and search asynchronously:
+
+```rust,no_run
+use darash::{SearchClient, SearchQuery, SafeSearch, TimeRange};
+
+#[tokio::main]
+async fn main() -> Result<(), darash::Error> {
+    let client = SearchClient::new("http://localhost:8080")?;
+    let query = SearchQuery::new("rust async")
+        .with_categories("general,news")
+        .with_engines(["brave", "duckduckgo"])
+        .with_language("en-US")
+        .with_page(1)
+        .with_safe_search(SafeSearch::Moderate)
+        .with_time_range(TimeRange::Month);
+
+    let response = client.search(&query).await?;
+    for citation in response.citations() {
+        println!("{} — {}", citation.title, citation.url);
+    }
+    Ok(())
+}
+```
+
+`SearchResponse` also exposes the raw SearxNG query, result count, results,
+answers, corrections, and suggestions. Each `SearchResult` includes its title,
+URL, snippet, engines, category, publication date, and score.
+
+Use `SearchConfig` when the endpoint needs a custom timeout:
+
+```rust,no_run
+use std::time::Duration;
+use darash::{SearchClient, SearchConfig};
+
+fn main() -> Result<(), darash::Error> {
+    let config = SearchConfig::new("https://search.example.test")?
+        .with_timeout(Duration::from_secs(5));
+    let _client = SearchClient::from_config(config)?;
+    Ok(())
+}
+```
+
+## Limits and errors
+
+- Requests time out after 15 seconds by default; configure this with
+  `SearchConfig::with_timeout`.
+- Response bodies are capped at 256 KiB, including streamed responses.
+- Queries must contain non-whitespace text, and page numbers start at 1.
+- Endpoints must use `http` or `https` and cannot contain embedded credentials.
+- Redirects are disabled. Point the client at the final SearxNG endpoint.
+- `Error` distinguishes invalid configuration, request failures, non-success
+  HTTP responses, oversized or invalid responses, and JSON decode failures.
+
+## Native quality checks
+
+Run these commands from the crate root:
+
+```sh
+cargo fmt --all -- --check
+cargo build --locked
+cargo test --locked
+cargo clippy --all-targets --all-features -- -D warnings
+cargo package --locked
+```
+
+Darash is licensed under MPL-2.0.
