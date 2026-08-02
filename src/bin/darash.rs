@@ -14,7 +14,11 @@ struct CliArgs {
 #[tokio::main]
 async fn main() {
     let args = match parse_args(env::args().skip(1)) {
-        Ok(args) => args,
+        Ok(Some(args)) => args,
+        Ok(None) => {
+            print_usage();
+            return;
+        }
         Err(error) => {
             eprintln!("{error}");
             print_usage();
@@ -45,14 +49,14 @@ async fn run(args: CliArgs) -> Result<(), String> {
     Ok(())
 }
 
-fn parse_args<I>(args: I) -> Result<CliArgs, String>
+fn parse_args<I>(args: I) -> Result<Option<CliArgs>, String>
 where
     I: IntoIterator<Item = String>,
 {
     let mut args = args.into_iter();
     match args.next().as_deref() {
         Some("search") => {}
-        Some("--help" | "-h") => return Err(usage().to_owned()),
+        Some("--help" | "-h") => return Ok(None),
         Some(command) => return Err(format!("unknown command: {command}")),
         None => return Err("missing command".to_owned()),
     }
@@ -80,7 +84,7 @@ where
             "--url" => {
                 endpoint = Some(args.next().ok_or("--url requires a value")?);
             }
-            "--help" | "-h" => return Err(usage().to_owned()),
+            "--help" | "-h" => return Ok(None),
             value if value.starts_with('-') => return Err(format!("unknown option: {value}")),
             value => query.push(value.to_owned()),
         }
@@ -90,12 +94,12 @@ where
         return Err("search requires a query".to_owned());
     }
 
-    Ok(CliArgs {
+    Ok(Some(CliArgs {
         query: query.join(" "),
         mode,
         sources,
         endpoint,
-    })
+    }))
 }
 
 fn parse_mode(value: &str) -> Result<SearchMode, String> {
@@ -155,11 +159,22 @@ mod tests {
             "--url".to_owned(),
             "http://localhost:9090".to_owned(),
         ])
-        .expect("valid arguments");
+        .expect("valid arguments")
+        .expect("not help");
 
         assert_eq!(args.query, "rust async");
         assert_eq!(args.mode, SearchMode::Quality);
         assert_eq!(args.sources, [SearchSource::Academic]);
         assert_eq!(args.endpoint.as_deref(), Some("http://localhost:9090"));
+    }
+
+    #[test]
+    fn parses_help_without_error() {
+        assert!(parse_args(["--help".to_owned()])
+            .expect("help is valid")
+            .is_none());
+        assert!(parse_args(["search".to_owned(), "--help".to_owned()])
+            .expect("help is valid")
+            .is_none());
     }
 }
