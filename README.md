@@ -26,11 +26,11 @@ for configuration and maintenance.
 
 ## Use the crate
 
-Add Darash from GitHub:
+Add Darash from crates.io:
 
 ```toml
 [dependencies]
-darash = { git = "https://github.com/tschk/darash" }
+darash = "0.2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

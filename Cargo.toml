@@ -15,5 +15,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
-websurfx = { version = "1.29.9", git = "https://github.com/tschk/websurfx", rev = "b8594b3", default-features = false }
+websurfx = { version = "1.29.9", default-features = false }
 url = "2"

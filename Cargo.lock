@@ -2146,7 +2146,8 @@ dependencies = [
 [[package]]
 name = "minify-js"
 version = "0.6.0"
-source = "git+https://github.com/RuairidhWilliamson/minify-js?branch=master#8637df12fdb1d86d7586dde8adf4b8a5d39e7067"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1fa5546ee8bd66024113e506cabe4230e76635a094c06ea2051b66021dda92e"
 dependencies = [
  "aho-corasick 0.7.20",
  "lazy_static",
@@ -2427,9 +2428,9 @@ dependencies = [
 
 [[package]]
 name = "parse-js"
-version = "0.21.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26f2abaec4434c4c5ec8bb3abfa112c9779f774b54ef3d9a6321e022cfcced5f"
+checksum = "2742b5e32dcb5930447ed9f9e401a7dfd883867fc079c4fac44ae8ba3593710e"
 dependencies = [
  "aho-corasick 0.7.20",
  "bumpalo",
@@ -4379,7 +4380,8 @@ dependencies = [
 [[package]]
 name = "websurfx"
 version = "1.29.9"
-source = "git+https://github.com/tschk/websurfx?rev=b8594b3#b8594b304a3ab61058c7adeb493daa877d393df3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "667c156d931afdcc9fc4196c52dcc7542dcb0c07bb6f4616b73a92a8b70248b1"
 dependencies = [
  "actix-cors",
  "actix-files",
