@@ -87,6 +87,8 @@ async fn main() -> Result<(), darash::Error> {
 
 `SearchMode` supports `Speed`, `Balanced` (the default), and `Quality`.
 `SearchSource` supports `Web` (the default), `Academic`, and `Discussions`.
+JSON requests may omit `mode` and `sources`; they default to `balanced` and
+`web`.
 The host can synthesize an answer from the returned sources with its own model.
 
 ## CLI

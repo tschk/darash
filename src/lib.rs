@@ -104,8 +104,14 @@ impl SearchMode {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SearchRequest {
     query: String,
+    #[serde(default)]
     mode: SearchMode,
+    #[serde(default = "default_sources")]
     sources: Vec<SearchSource>,
+}
+
+fn default_sources() -> Vec<SearchSource> {
+    vec![SearchSource::default()]
 }
 
 impl SearchRequest {
@@ -143,7 +149,17 @@ impl SearchRequest {
     where
         I: IntoIterator<Item = SearchSource>,
     {
-        self.sources = sources.into_iter().collect();
+        let mut selected = Vec::new();
+        for source in sources {
+            if !selected.contains(&source) {
+                selected.push(source);
+            }
+        }
+        self.sources = if selected.is_empty() {
+            vec![SearchSource::default()]
+        } else {
+            selected
+        };
         self
     }
 
@@ -500,6 +516,9 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
 
     #[test]
     fn request_carries_mode_and_sources_into_searxng_query() {
@@ -516,6 +535,28 @@ mod tests {
             request.search_query().to_query_string(),
             "q=rust+async&format=json&categories=science%2Csocial+media"
         );
+    }
+
+    #[test]
+    fn empty_sources_fall_back_to_web_and_duplicates_are_removed() {
+        let request = SearchRequest::new("rust")
+            .with_sources([SearchSource::Academic, SearchSource::Academic]);
+        assert_eq!(request.sources(), [SearchSource::Academic]);
+
+        let request = SearchRequest::new("rust").with_sources([]);
+        assert_eq!(request.sources(), [SearchSource::Web]);
+        assert_eq!(
+            request.search_query().to_query_string(),
+            "q=rust&format=json&categories=general"
+        );
+    }
+
+    #[test]
+    fn request_deserializes_with_vane_defaults() {
+        let request: SearchRequest =
+            serde_json::from_str(r#"{"query":"rust"}"#).expect("query-only request");
+        assert_eq!(request.mode(), SearchMode::Balanced);
+        assert_eq!(request.sources(), [SearchSource::Web]);
     }
 
     #[test]
@@ -635,5 +676,63 @@ mod tests {
                 published_date: Some("2026-01-02".to_owned()),
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn search_fetches_json_and_reports_http_errors() {
+        let body = r#"{"query":"rust","number_of_results":1,"results":[{"title":"Rust","url":"https://example.com/rust","content":"A Rust guide."}]}"#;
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let response = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search(&SearchQuery::new("rust"))
+            .await
+            .expect("successful response");
+        let request = server.join().expect("server thread");
+
+        assert!(request.starts_with("GET /search?q=rust&format=json HTTP/1.1"));
+        assert_eq!(response.query, "rust");
+        assert_eq!(response.cited_sources()[0].title, "Rust");
+
+        let (endpoint, server) = spawn_http_server(
+            "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 12\r\nConnection: close\r\n\r\nupstream bad".to_owned(),
+        );
+        let error = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search(&SearchQuery::new("rust"))
+            .await
+            .expect_err("HTTP errors must be surfaced");
+        server.join().expect("server thread");
+
+        assert!(
+            matches!(error, Error::HttpStatus { status, body } if status == StatusCode::BAD_GATEWAY && body == "upstream bad")
+        );
+    }
+
+    fn spawn_http_server(response: String) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test request");
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            loop {
+                let length = stream.read(&mut chunk).expect("read test request");
+                if length == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..length]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream
+                .write_all(response.as_bytes())
+                .expect("write test response");
+            String::from_utf8(request).expect("HTTP request is UTF-8")
+        });
+        (format!("http://{address}"), handle)
     }
 }
