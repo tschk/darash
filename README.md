@@ -60,8 +60,47 @@ async fn main() -> Result<(), darash::Error> {
 ```
 
 `SearchResponse` also exposes the raw SearxNG query, result count, results,
-answers, corrections, and suggestions. Each `SearchResult` includes its title,
-URL, snippet, engines, category, publication date, and score.
+answers, corrections, and suggestions. Its optional `answer` is a backend
+answer when one is supplied; Darash does not call an AI provider. `sources` and
+`cited_sources()` expose the cited `Citation` values for host-owned synthesis.
+Each `SearchResult` includes its title, URL, snippet, engines, category,
+publication date, and score.
+
+The Vane-compatible request contract carries a search mode and source selection
+without adding provider credentials:
+
+```rust,no_run
+use darash::{SearchClient, SearchMode, SearchRequest, SearchSource};
+
+#[tokio::main]
+async fn main() -> Result<(), darash::Error> {
+    let request = SearchRequest::new("rust async")
+        .with_mode(SearchMode::Quality)
+        .with_sources([SearchSource::Web, SearchSource::Academic]);
+    let response = SearchClient::local()?.search_request(&request).await?;
+    for source in response.cited_sources() {
+        println!("{}: {}", source.title, source.url);
+    }
+    Ok(())
+}
+```
+
+`SearchMode` supports `Speed`, `Balanced` (the default), and `Quality`.
+`SearchSource` supports `Web` (the default), `Academic`, and `Discussions`.
+The host can synthesize an answer from the returned sources with its own model.
+
+## CLI
+
+The native CLI uses `http://localhost:8080` by default and does not require an
+environment variable. Pass `--url` only when using another SearxNG endpoint:
+
+```sh
+cargo run -- search "rust async"
+cargo run -- search "rust async" --mode quality --source academic --url http://localhost:9090
+```
+
+The CLI prints any backend answer and the cited sources. AI synthesis remains a
+host responsibility; no MCP server is needed for this in-process tool.
 
 Use `SearchConfig` when the endpoint needs a custom timeout:
 

@@ -2,10 +2,11 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use reqwest::StatusCode;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use url::{form_urlencoded, Url};
 
+pub const DEFAULT_ENDPOINT: &str = "http://localhost:8080";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 
@@ -43,6 +44,109 @@ impl TimeRange {
             Self::Month => "month",
             Self::Year => "year",
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchMode {
+    Speed,
+    #[default]
+    Balanced,
+    Quality,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SearchSource {
+    #[default]
+    Web,
+    Academic,
+    Discussions,
+}
+
+impl SearchSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Web => "web",
+            Self::Academic => "academic",
+            Self::Discussions => "discussions",
+        }
+    }
+
+    fn category(self) -> &'static str {
+        match self {
+            Self::Web => "general",
+            Self::Academic => "science",
+            Self::Discussions => "social media",
+        }
+    }
+}
+
+impl SearchMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Speed => "speed",
+            Self::Balanced => "balanced",
+            Self::Quality => "quality",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SearchRequest {
+    query: String,
+    mode: SearchMode,
+    sources: Vec<SearchSource>,
+}
+
+impl SearchRequest {
+    pub fn new(query: impl Into<String>) -> Self {
+        Self {
+            query: query.into(),
+            mode: SearchMode::default(),
+            sources: vec![SearchSource::default()],
+        }
+    }
+
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub fn mode(&self) -> SearchMode {
+        self.mode
+    }
+
+    pub fn sources(&self) -> &[SearchSource] {
+        &self.sources
+    }
+
+    pub fn with_mode(mut self, mode: SearchMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn with_source(mut self, source: SearchSource) -> Self {
+        self.sources = vec![source];
+        self
+    }
+
+    pub fn with_sources<I>(mut self, sources: I) -> Self
+    where
+        I: IntoIterator<Item = SearchSource>,
+    {
+        self.sources = sources.into_iter().collect();
+        self
+    }
+
+    fn search_query(&self) -> SearchQuery {
+        let categories = self
+            .sources
+            .iter()
+            .map(|source| source.category())
+            .collect::<Vec<_>>()
+            .join(",");
+        SearchQuery::new(self.query.clone()).with_categories(categories)
     }
 }
 
@@ -190,6 +294,10 @@ impl SearchClient {
         Self::from_config(SearchConfig::new(endpoint)?)
     }
 
+    pub fn local() -> Result<Self, Error> {
+        Self::new(DEFAULT_ENDPOINT)
+    }
+
     pub fn from_config(config: SearchConfig) -> Result<Self, Error> {
         if config.timeout.is_zero() {
             return Err(Error::InvalidTimeout);
@@ -222,7 +330,16 @@ impl SearchClient {
         if !status.is_success() {
             return Err(Error::HttpStatus { status, body });
         }
-        serde_json::from_str(&body).map_err(Error::Decode)
+        let mut response: SearchResponse = serde_json::from_str(&body).map_err(Error::Decode)?;
+        if response.answer.is_none() {
+            response.answer = response.answers.first().cloned();
+        }
+        response.sources = response.citations();
+        Ok(response)
+    }
+
+    pub async fn search_request(&self, request: &SearchRequest) -> Result<SearchResponse, Error> {
+        self.search(&request.search_query()).await
     }
 
     fn search_url(&self) -> Url {
@@ -260,7 +377,7 @@ async fn read_response_body(response: reqwest::Response) -> Result<String, Error
     String::from_utf8(body).map_err(|error| Error::InvalidResponseEncoding(error.to_string()))
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SearchResponse {
     #[serde(default)]
     pub query: String,
@@ -271,6 +388,10 @@ pub struct SearchResponse {
     #[serde(default)]
     pub answers: Vec<String>,
     #[serde(default)]
+    pub answer: Option<String>,
+    #[serde(default)]
+    pub sources: Vec<Citation>,
+    #[serde(default)]
     pub corrections: Vec<String>,
     #[serde(default)]
     pub suggestions: Vec<String>,
@@ -280,9 +401,17 @@ impl SearchResponse {
     pub fn citations(&self) -> Vec<Citation> {
         self.results.iter().map(SearchResult::citation).collect()
     }
+
+    pub fn cited_sources(&self) -> Vec<Citation> {
+        if self.sources.is_empty() {
+            self.citations()
+        } else {
+            self.sources.clone()
+        }
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SearchResult {
     #[serde(default)]
     pub title: String,
@@ -317,7 +446,7 @@ impl SearchResult {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Citation {
     pub title: String,
     pub url: String,
@@ -353,6 +482,23 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_carries_mode_and_sources_into_searxng_query() {
+        let request = SearchRequest::new("rust async")
+            .with_mode(SearchMode::Quality)
+            .with_sources([SearchSource::Academic, SearchSource::Discussions]);
+
+        assert_eq!(request.mode(), SearchMode::Quality);
+        assert_eq!(
+            request.sources(),
+            [SearchSource::Academic, SearchSource::Discussions]
+        );
+        assert_eq!(
+            request.search_query().to_query_string(),
+            "q=rust+async&format=json&categories=science%2Csocial+media"
+        );
+    }
 
     #[test]
     fn query_serializes_searxng_parameters() {
@@ -397,6 +543,7 @@ mod tests {
             r#"{
                 "query": "rust async",
                 "number_of_results": 1,
+                "answers": ["Async Rust is Rust with futures."],
                 "results": [{
                     "title": "Async Rust",
                     "url": "https://example.com/rust",
@@ -414,6 +561,7 @@ mod tests {
 
         assert_eq!(response.query, "rust async");
         assert_eq!(response.results.len(), 1);
+        assert_eq!(response.answers[0], "Async Rust is Rust with futures.");
         assert_eq!(response.suggestions, ["rust futures"]);
         assert_eq!(
             response.citations(),
