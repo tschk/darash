@@ -26,12 +26,11 @@ for configuration and maintenance.
 
 ## Use the crate
 
-Darash is not yet published on crates.io. Depend on the public repository for
-now:
+Add Darash from crates.io:
 
 ```toml
 [dependencies]
-darash = { git = "https://github.com/tschk/darash", branch = "main" }
+darash = "0.1.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
