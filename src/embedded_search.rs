@@ -357,7 +357,8 @@ async fn get_body(client: &Client, url: &str) -> Result<String, String> {
         .await
         .map_err(|error| error.to_string())?;
     if !status.is_success() {
-        return Err(format!("HTTP {status}: {}", bounded_error(&body)));
+        log::error!("provider request failed with HTTP {status}: {}", bounded_error(&body));
+        return Err(format!("provider request failed: HTTP {status}"));
     }
     Ok(body)
 }
