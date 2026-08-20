@@ -548,20 +548,20 @@ fn dedupe_and_rank(query: &str, results: Vec<SearchResult>) -> Vec<SearchResult>
             continue;
         };
         result.url = key.clone();
-        if let Some(existing) = merged.get_mut(&key) {
-            for engine in result.engines {
-                if !existing.engines.contains(&engine) {
-                    existing.engines.push(engine);
-                }
-            }
-            if existing.engine.is_none() {
-                existing.engine = result.engine;
-            }
-            if existing.content.len() < result.content.len() {
-                existing.content = result.content;
-            }
-        } else {
+        let Some(existing) = merged.get_mut(&key) else {
             merged.insert(key, result);
+            continue;
+        };
+        for engine in result.engines {
+            if !existing.engines.contains(&engine) {
+                existing.engines.push(engine);
+            }
+        }
+        if existing.engine.is_none() {
+            existing.engine = result.engine;
+        }
+        if existing.content.len() < result.content.len() {
+            existing.content = result.content;
         }
     }
     let mut results = merged.into_values().collect::<Vec<_>>();
