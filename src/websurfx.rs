@@ -74,25 +74,10 @@ impl WebsurfxSearchResponse {
             .into_iter()
             .map(WebsurfxSearchResult::into_search_result)
             .collect::<Vec<_>>();
-        let sources = results
-            .iter()
-            .map(SearchResult::citation)
-            .collect::<Vec<Citation>>();
-        let mut provider_counts = BTreeMap::new();
-        for result in &results {
-            for engine in &result.engines {
-                *provider_counts.entry(engine.clone()).or_insert(0) += 1;
-            }
-        }
-        let provider_status = provider_counts
-            .into_iter()
-            .map(|(provider, count)| ProviderStatus::success(provider, count))
-            .chain(
-                self.engine_errors_info
-                    .iter()
-                    .map(|error| ProviderStatus::failed(error.engine.clone(), error.error.clone())),
-            )
-            .collect();
+
+        let sources = Self::extract_citations(&results);
+        let provider_status = Self::compute_provider_status(&results, &self.engine_errors_info);
+
         let safe_search_level = self.safe_search_level;
         let metadata = WebsurfxMetadata {
             engine_errors_info: self.engine_errors_info,
@@ -120,6 +105,34 @@ impl WebsurfxSearchResponse {
             },
         };
         WebsurfxMappedResponse { response, metadata }
+    }
+
+    fn extract_citations(results: &[SearchResult]) -> Vec<Citation> {
+        results
+            .iter()
+            .map(SearchResult::citation)
+            .collect::<Vec<Citation>>()
+    }
+
+    fn compute_provider_status(
+        results: &[SearchResult],
+        engine_errors: &[WebsurfxEngineError],
+    ) -> Vec<ProviderStatus> {
+        let mut provider_counts = BTreeMap::new();
+        for result in results {
+            for engine in &result.engines {
+                *provider_counts.entry(engine.clone()).or_insert(0) += 1;
+            }
+        }
+        provider_counts
+            .into_iter()
+            .map(|(provider, count)| ProviderStatus::success(provider, count))
+            .chain(
+                engine_errors
+                    .iter()
+                    .map(|error| ProviderStatus::failed(error.engine.clone(), error.error.clone())),
+            )
+            .collect()
     }
 }
 
