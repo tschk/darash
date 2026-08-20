@@ -1,4 +1,5 @@
 use std::env;
+use std::io::Write;
 
 use darash::{SearchClient, SearchMode, SearchRequest, SearchResponse, SearchSource};
 
@@ -119,8 +120,9 @@ fn parse_source(value: &str) -> Result<SearchSource, String> {
 }
 
 fn print_response(response: &SearchResponse) {
+    let mut stdout = std::io::stdout().lock();
     if let Some(answer) = &response.answer {
-        println!("{answer}\n");
+        let _ = writeln!(stdout, "{answer}\n");
     }
     for source in response.cited_sources() {
         let title = if source.title.is_empty() {
@@ -128,7 +130,7 @@ fn print_response(response: &SearchResponse) {
         } else {
             &source.title
         };
-        println!("{title}\n{}\n{}\n", source.url, source.snippet);
+        let _ = writeln!(stdout, "{title}\n{}\n{}\n", source.url, source.snippet);
     }
 }
 
