@@ -1107,6 +1107,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn search_websurfx_fetches_json_and_reports_http_errors() {
+        let body = r#"{"results":[{"title":"Rust","url":"https://example.com/rust","description":"A Rust guide.","engine":["DuckDuckGo"],"relevanceScore":0.8}]}"#;
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let mapped_response = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search_websurfx(&WebsurfxQuery::new("rust"))
+            .await
+            .expect("successful response");
+        let request = server.join().expect("server thread");
+
+        assert!(request.starts_with("GET /search?q=rust&json=true HTTP/1.1"));
+        assert_eq!(mapped_response.response.query, "rust");
+        assert_eq!(mapped_response.response.cited_sources()[0].title, "Rust");
+
+        let (endpoint, server) = spawn_http_server(
+            "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 12\r\nConnection: close\r\n\r\nupstream bad".to_owned(),
+        );
+        let error = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search_websurfx(&WebsurfxQuery::new("rust"))
+            .await
+            .expect_err("HTTP errors must be surfaced");
+        server.join().expect("server thread");
+
+        assert!(
+            matches!(error, Error::HttpStatus { status, body } if status == StatusCode::BAD_GATEWAY && body == "upstream bad")
+        );
+    }
+
+    #[tokio::test]
     async fn search_fetches_json_and_reports_http_errors() {
         let body = r#"{"query":"rust","number_of_results":1,"results":[{"title":"Rust","url":"https://example.com/rust","content":"A Rust guide."}]}"#;
         let (endpoint, server) = spawn_http_server(format!(
