@@ -1297,7 +1297,7 @@ mod tests {
     }
 
     #[tokio::test]
-async fn cache_methods_reflect_and_clear_search_entries() {
+    async fn cache_methods_reflect_and_clear_search_entries() {
         let body = r#"{"query":"rust","number_of_results":1,"results":[{"title":"Rust","url":"https://example.com/rust","content":"A Rust guide."}]}"#;
         let (endpoint, server) = spawn_http_server(format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
