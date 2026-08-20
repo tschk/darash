@@ -547,21 +547,25 @@ fn dedupe_and_rank(query: &str, results: Vec<SearchResult>) -> Vec<SearchResult>
         let Some(key) = safe_url(&result.url) else {
             continue;
         };
-        result.url = key.clone();
-        if let Some(existing) = merged.get_mut(&key) {
-            for engine in result.engines {
-                if !existing.engines.contains(&engine) {
-                    existing.engines.push(engine);
+        match merged.entry(key) {
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                let existing = entry.get_mut();
+                for engine in result.engines {
+                    if !existing.engines.contains(&engine) {
+                        existing.engines.push(engine);
+                    }
+                }
+                if existing.engine.is_none() {
+                    existing.engine = result.engine;
+                }
+                if existing.content.len() < result.content.len() {
+                    existing.content = result.content;
                 }
             }
-            if existing.engine.is_none() {
-                existing.engine = result.engine;
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                result.url = entry.key().clone();
+                entry.insert(result);
             }
-            if existing.content.len() < result.content.len() {
-                existing.content = result.content;
-            }
-        } else {
-            merged.insert(key, result);
         }
     }
     let mut results = merged.into_values().collect::<Vec<_>>();
