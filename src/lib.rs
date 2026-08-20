@@ -785,6 +785,17 @@ pub struct Citation {
     pub published_date: Option<String>,
 }
 
+impl std::fmt::Display for Citation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let title = if self.title.is_empty() {
+            "(untitled)"
+        } else {
+            &self.title
+        };
+        write!(f, "{}\n{}\n{}", title, self.url, self.snippet)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("invalid endpoint: {0}")]
