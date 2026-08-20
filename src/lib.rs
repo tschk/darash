@@ -1001,6 +1001,26 @@ mod tests {
     }
 
     #[test]
+    fn search_config_from_url_validates_scheme_and_credentials() {
+        // Valid URLs
+        let valid_http = Url::parse("http://localhost:8080").unwrap();
+        assert!(SearchConfig::from_url(valid_http).is_ok());
+
+        let valid_https = Url::parse("https://example.com/search").unwrap();
+        assert!(SearchConfig::from_url(valid_https).is_ok());
+
+        // Invalid scheme
+        let invalid_scheme = Url::parse("ftp://localhost:8080").unwrap();
+        let err = SearchConfig::from_url(invalid_scheme).unwrap_err();
+        assert!(matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint must use http or https"));
+
+        // URL with credentials
+        let url_with_creds = Url::parse("http://user:pass@localhost:8080").unwrap();
+        let err = SearchConfig::from_url(url_with_creds).unwrap_err();
+        assert!(matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint credentials are not supported"));
+    }
+
+    #[test]
     fn local_client_selects_direct_backend() {
         let client = SearchClient::local().expect("local backend");
         assert!(client.embedded);
