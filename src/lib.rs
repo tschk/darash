@@ -918,6 +918,21 @@ mod tests {
     }
 
     #[test]
+    fn provider_status_success_is_correct() {
+        let status = ProviderStatus::success("arxiv", 42);
+        assert_eq!(status.provider, "arxiv");
+        assert_eq!(status.status, ProviderStatusKind::Success);
+        assert_eq!(status.result_count, 42);
+        assert_eq!(status.error, None);
+
+        let encoded = serde_json::to_value(status).expect("status serializes");
+        assert_eq!(encoded["provider"], "arxiv");
+        assert_eq!(encoded["status"], "success");
+        assert_eq!(encoded["result_count"], 42);
+        assert!(encoded.get("error").is_none() || encoded["error"].is_null());
+    }
+
+    #[test]
     fn mode_limits_results_without_replacing_backend_sources() {
         let source = Citation {
             title: "Backend source".to_owned(),
