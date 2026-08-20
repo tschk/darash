@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use darash::{
     Error, SafeSearch, SearchClient, SearchMode, SearchQuery, SearchRequest, SearchResponse,
-    SearchSource, TimeRange,
+    SearchSource, TimeRange, WebsurfxQuery,
 };
 use serde_json::json;
 
@@ -89,6 +89,16 @@ async fn query_validation_completes_before_network_access() {
     assert!(matches!(
         client.search(&SearchQuery::new("rust").with_page(0)).await,
         Err(Error::InvalidPage)
+    ));
+    assert!(matches!(
+        client
+            .search(&SearchQuery::new("rust").with_page(u32::MAX))
+            .await,
+        Err(Error::PageOverflow)
+    ));
+    assert!(matches!(
+        client.search_websurfx(&WebsurfxQuery::new("  ")).await,
+        Err(Error::EmptyQuery)
     ));
 
     let timeout = client

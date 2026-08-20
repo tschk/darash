@@ -357,7 +357,11 @@ async fn get_body(client: &Client, url: &str) -> Result<String, String> {
         .await
         .map_err(|error| error.to_string())?;
     if !status.is_success() {
-        return Err(format!("HTTP {status}: {}", bounded_error(&body)));
+        log::error!(
+            "provider request failed with HTTP {status}: {}",
+            bounded_error(&body)
+        );
+        return Err(format!("provider request failed: HTTP {status}"));
     }
     Ok(body)
 }
@@ -595,21 +599,25 @@ fn rank_results(query: &str, results: &mut [SearchResult]) {
         .collect::<Vec<_>>();
     let document_count = documents.len() as f64;
     let query_terms = query_terms.into_iter().collect::<HashSet<_>>();
+    let mut term_idfs = Vec::with_capacity(query_terms.len());
+    for term in &query_terms {
+        let document_frequency = documents
+            .iter()
+            .filter(|document| document.contains(term))
+            .count() as f64;
+        let inverse_document_frequency =
+            ((document_count + 1.0) / (document_frequency + 1.0)).ln() + 1.0;
+        term_idfs.push((term, inverse_document_frequency));
+    }
     for (index, result) in results.iter_mut().enumerate() {
         let title = tokenize(&result.title);
         let content = tokenize(&result.content);
         let url = tokenize(&result.url);
         let mut score = 0.0;
-        for term in &query_terms {
-            let document_frequency = documents
-                .iter()
-                .filter(|document| document.contains(term))
-                .count() as f64;
-            let inverse_document_frequency =
-                ((document_count + 1.0) / (document_frequency + 1.0)).ln() + 1.0;
-            let title_frequency = title.iter().filter(|token| *token == term).count() as f64;
-            let content_frequency = content.iter().filter(|token| *token == term).count() as f64;
-            let url_frequency = url.iter().filter(|token| *token == term).count() as f64;
+        for (term, inverse_document_frequency) in &term_idfs {
+            let title_frequency = title.iter().filter(|token| *token == *term).count() as f64;
+            let content_frequency = content.iter().filter(|token| *token == *term).count() as f64;
+            let url_frequency = url.iter().filter(|token| *token == *term).count() as f64;
             score += inverse_document_frequency
                 * (2.0 * title_frequency / title.len().max(1) as f64
                     + content_frequency / content.len().max(1) as f64
@@ -781,6 +789,33 @@ mod tests {
         let selected = providers(&query);
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].name(), "openalex");
+    }
+
+    #[test]
+    fn provider_selection_uses_aliases_and_falls_back_from_unknown_engines() {
+        let aliased = SearchQuery::new("rust")
+            .with_engines(["ddg", "HN", "academic"])
+            .with_mode(crate::SearchMode::Quality);
+        let selected = providers(&aliased);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|provider| provider.name())
+                .collect::<Vec<_>>(),
+            ["duckduckgo", "hacker-news", "openalex"]
+        );
+
+        let unknown = SearchQuery::new("rust")
+            .with_engines(["bing", "google"])
+            .with_categories("science,social media");
+        let selected = providers(&unknown);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|provider| provider.name())
+                .collect::<Vec<_>>(),
+            ["openalex", "hacker-news"]
+        );
     }
 
     #[test]

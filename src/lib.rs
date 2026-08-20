@@ -561,6 +561,9 @@ impl SearchClient {
         &self,
         query: &WebsurfxQuery,
     ) -> Result<WebsurfxMappedResponse, Error> {
+        if query.query().trim().is_empty() {
+            return Err(Error::EmptyQuery);
+        }
         let url = websurfx::build_search_url(self.config.endpoint(), query)
             .map_err(|error| Error::InvalidEndpoint(error.to_string()))?;
         let response = self.http.get(url).send().await.map_err(Error::Request)?;
@@ -928,6 +931,21 @@ mod tests {
     }
 
     #[test]
+    fn provider_status_success_is_correct() {
+        let status = ProviderStatus::success("arxiv", 42);
+        assert_eq!(status.provider, "arxiv");
+        assert_eq!(status.status, ProviderStatusKind::Success);
+        assert_eq!(status.result_count, 42);
+        assert_eq!(status.error, None);
+
+        let encoded = serde_json::to_value(status).expect("status serializes");
+        assert_eq!(encoded["provider"], "arxiv");
+        assert_eq!(encoded["status"], "success");
+        assert_eq!(encoded["result_count"], 42);
+        assert!(encoded.get("error").is_none() || encoded["error"].is_null());
+    }
+
+    #[test]
     fn mode_limits_results_without_replacing_backend_sources() {
         let source = Citation {
             title: "Backend source".to_owned(),
@@ -1011,6 +1029,30 @@ mod tests {
     }
 
     #[test]
+    fn search_config_from_url_validates_scheme_and_credentials() {
+        // Valid URLs
+        let valid_http = Url::parse("http://localhost:8080").unwrap();
+        assert!(SearchConfig::from_url(valid_http).is_ok());
+
+        let valid_https = Url::parse("https://example.com/search").unwrap();
+        assert!(SearchConfig::from_url(valid_https).is_ok());
+
+        // Invalid scheme
+        let invalid_scheme = Url::parse("ftp://localhost:8080").unwrap();
+        let err = SearchConfig::from_url(invalid_scheme).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint must use http or https")
+        );
+
+        // URL with credentials
+        let url_with_creds = Url::parse("http://user:pass@localhost:8080").unwrap();
+        let err = SearchConfig::from_url(url_with_creds).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint credentials are not supported")
+        );
+    }
+
+    #[test]
     fn local_client_selects_direct_backend() {
         let client = SearchClient::local().expect("local backend");
         assert!(client.embedded);
@@ -1079,6 +1121,135 @@ mod tests {
 
         assert_eq!(response.answers, ["Async Rust uses futures."]);
         assert_eq!(response.results[0].url, "");
+    }
+
+    #[test]
+    fn cited_sources_returns_sources_fallback_to_citations() {
+        let mut response: SearchResponse = serde_json::from_str(
+            r#"{
+                "results": [{"title":"Rust","url":"https://example.com","content":"A guide.","engine":"brave"}]
+            }"#,
+        )
+        .expect("compatible SearxNG response");
+
+        assert!(response.sources.is_empty());
+        assert_eq!(response.cited_sources(), response.citations());
+        assert_eq!(response.cited_sources().len(), 1);
+        assert_eq!(response.cited_sources()[0].title, "Rust");
+
+        let citation = Citation {
+            title: "Source".to_owned(),
+            url: "https://example.com/source".to_owned(),
+            snippet: "A source snippet".to_owned(),
+            source: None,
+            published_date: None,
+        };
+        response.sources = vec![citation.clone()];
+
+        assert_eq!(response.cited_sources(), response.sources);
+        assert_eq!(response.cited_sources().len(), 1);
+        assert_eq!(response.cited_sources()[0].title, "Source");
+    }
+
+    #[tokio::test]
+    async fn search_websurfx_fetches_json_and_reports_http_errors() {
+        let body = r#"{"results":[{"title":"Rust","url":"https://example.com/rust","description":"A Rust guide.","engine":["DuckDuckGo"],"relevanceScore":0.8}]}"#;
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let mapped_response = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search_websurfx(&WebsurfxQuery::new("rust"))
+            .await
+            .expect("successful response");
+        let request = server.join().expect("server thread");
+
+        assert!(request.starts_with("GET /search?q=rust&json=true HTTP/1.1"));
+        assert_eq!(mapped_response.response.query, "rust");
+        assert_eq!(mapped_response.response.cited_sources()[0].title, "Rust");
+
+        let (endpoint, server) = spawn_http_server(
+            "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 12\r\nConnection: close\r\n\r\nupstream bad".to_owned(),
+        );
+        let error = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search_websurfx(&WebsurfxQuery::new("rust"))
+            .await
+            .expect_err("HTTP errors must be surfaced");
+        server.join().expect("server thread");
+
+        assert!(
+            matches!(error, Error::HttpStatus { status, body } if status == StatusCode::BAD_GATEWAY && body == "upstream bad")
+        );
+    }
+
+    #[tokio::test]
+    async fn search_websurfx_reports_decode_and_oversized_responses() {
+        let body = "{not json}";
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let error = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search_websurfx(&WebsurfxQuery::new("rust"))
+            .await
+            .expect_err("invalid JSON must fail");
+        server.join().expect("server thread");
+        assert!(matches!(error, Error::Decode(_)));
+
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            MAX_RESPONSE_BYTES + 1
+        ));
+        let error = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search_websurfx(&WebsurfxQuery::new("rust"))
+            .await
+            .expect_err("oversized responses must fail");
+        server.join().expect("server thread");
+        assert!(matches!(error, Error::ResponseTooLarge));
+    }
+
+    #[tokio::test]
+    async fn search_projects_sparse_searxng_answers_counts_and_sources() {
+        let body = r#"{"answers":[{"content":"From content."},{"text":"From text."}],"results":[{"title":"Rust","url":"https://example.com/rust","content":"A guide."}]}"#;
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let response = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search(&SearchQuery::new("rust"))
+            .await
+            .expect("successful response");
+        server.join().expect("server thread");
+
+        assert_eq!(response.number_of_results, 1);
+        assert_eq!(response.answers, ["From content.", "From text."]);
+        assert_eq!(response.answer.as_deref(), Some("From content."));
+        assert_eq!(response.sources[0].title, "Rust");
+        assert_eq!(response.sources[0].url, "https://example.com/rust");
+    }
+
+    #[tokio::test]
+    async fn local_level4_blocklist_returns_disallowed_empty_response() {
+        let config = SearchConfig::new(DEFAULT_ENDPOINT)
+            .expect("valid endpoint")
+            .with_blocklist(["blocked-term"]);
+        let mut client = SearchClient::from_config(config).expect("client");
+        client.embedded = true;
+        let response = client
+            .search(&SearchQuery::new("blocked-term").with_safe_search(SafeSearch::Level4))
+            .await
+            .expect("disallowed query short-circuits");
+
+        assert!(response.results.is_empty());
+        assert!(response.sources.is_empty());
+        assert!(response.filters.disallowed);
+        assert_eq!(response.number_of_results, 0);
+        assert_eq!(client.cached_entries(), 1);
     }
 
     #[tokio::test]
