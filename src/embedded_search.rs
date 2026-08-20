@@ -599,21 +599,25 @@ fn rank_results(query: &str, results: &mut [SearchResult]) {
         .collect::<Vec<_>>();
     let document_count = documents.len() as f64;
     let query_terms = query_terms.into_iter().collect::<HashSet<_>>();
+    let mut term_idfs = Vec::with_capacity(query_terms.len());
+    for term in &query_terms {
+        let document_frequency = documents
+            .iter()
+            .filter(|document| document.contains(term))
+            .count() as f64;
+        let inverse_document_frequency =
+            ((document_count + 1.0) / (document_frequency + 1.0)).ln() + 1.0;
+        term_idfs.push((term, inverse_document_frequency));
+    }
     for (index, result) in results.iter_mut().enumerate() {
         let title = tokenize(&result.title);
         let content = tokenize(&result.content);
         let url = tokenize(&result.url);
         let mut score = 0.0;
-        for term in &query_terms {
-            let document_frequency = documents
-                .iter()
-                .filter(|document| document.contains(term))
-                .count() as f64;
-            let inverse_document_frequency =
-                ((document_count + 1.0) / (document_frequency + 1.0)).ln() + 1.0;
-            let title_frequency = title.iter().filter(|token| *token == term).count() as f64;
-            let content_frequency = content.iter().filter(|token| *token == term).count() as f64;
-            let url_frequency = url.iter().filter(|token| *token == term).count() as f64;
+        for (term, inverse_document_frequency) in &term_idfs {
+            let title_frequency = title.iter().filter(|token| *token == *term).count() as f64;
+            let content_frequency = content.iter().filter(|token| *token == *term).count() as f64;
+            let url_frequency = url.iter().filter(|token| *token == *term).count() as f64;
             score += inverse_document_frequency
                 * (2.0 * title_frequency / title.len().max(1) as f64
                     + content_frequency / content.len().max(1) as f64
