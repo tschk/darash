@@ -18,3 +18,10 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 scraper = "0.26"
 url = "2"
 log = "0.4.33"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "bench"
+harness = false
