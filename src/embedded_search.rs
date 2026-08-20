@@ -784,6 +784,33 @@ mod tests {
     }
 
     #[test]
+    fn provider_selection_uses_aliases_and_falls_back_from_unknown_engines() {
+        let aliased = SearchQuery::new("rust")
+            .with_engines(["ddg", "HN", "academic"])
+            .with_mode(crate::SearchMode::Quality);
+        let selected = providers(&aliased);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|provider| provider.name())
+                .collect::<Vec<_>>(),
+            ["duckduckgo", "hacker-news", "openalex"]
+        );
+
+        let unknown = SearchQuery::new("rust")
+            .with_engines(["bing", "google"])
+            .with_categories("science,social media");
+        let selected = providers(&unknown);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|provider| provider.name())
+                .collect::<Vec<_>>(),
+            ["openalex", "hacker-news"]
+        );
+    }
+
+    #[test]
     fn ranking_uses_token_frequency_and_ignores_stop_words() {
         let results = dedupe_and_rank(
             "rust async",
