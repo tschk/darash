@@ -77,10 +77,9 @@ where
         self.remove_expired(&mut state, now);
         let expires_at = now.checked_add(self.ttl).unwrap_or(now);
 
-        if state.entries.contains_key(&key) {
-            state
-                .entries
-                .insert(key.clone(), Entry { value, expires_at });
+        if let Some(entry) = state.entries.get_mut(&key) {
+            entry.value = value;
+            entry.expires_at = expires_at;
             move_to_back(&mut state.order, &key);
             return;
         }
@@ -117,38 +116,21 @@ where
     }
 
     fn remove_expired(&self, state: &mut State<K, V>, now: Instant) {
-        let expired = state
+        let entries = &state.entries;
+        state
             .order
-            .iter()
-            .filter(|key| {
-                state
-                    .entries
-                    .get(*key)
-                    .is_none_or(|entry| entry.expires_at <= now)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        for key in expired {
-            state.entries.remove(&key);
-            remove_from_order(&mut state.order, &key);
-        }
+            .retain(|key| entries.get(key).is_some_and(|entry| entry.expires_at > now));
+        state.entries.retain(|_, entry| entry.expires_at > now);
     }
 }
 
 fn move_to_back<K>(order: &mut VecDeque<K>, key: &K)
 where
-    K: Eq + Clone,
-{
-    remove_from_order(order, key);
-    order.push_back(key.clone());
-}
-
-fn remove_from_order<K>(order: &mut VecDeque<K>, key: &K)
-where
     K: Eq,
 {
     if let Some(index) = order.iter().position(|current| current == key) {
-        order.remove(index);
+        let k = order.remove(index).unwrap();
+        order.push_back(k);
     }
 }
 
