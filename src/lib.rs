@@ -561,6 +561,9 @@ impl SearchClient {
         &self,
         query: &WebsurfxQuery,
     ) -> Result<WebsurfxMappedResponse, Error> {
+        if query.query().trim().is_empty() {
+            return Err(Error::EmptyQuery);
+        }
         let url = websurfx::build_search_url(self.config.endpoint(), query)
             .map_err(|error| Error::InvalidEndpoint(error.to_string()))?;
         let response = self.http.get(url).send().await.map_err(Error::Request)?;
@@ -1027,12 +1030,16 @@ mod tests {
         // Invalid scheme
         let invalid_scheme = Url::parse("ftp://localhost:8080").unwrap();
         let err = SearchConfig::from_url(invalid_scheme).unwrap_err();
-        assert!(matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint must use http or https"));
+        assert!(
+            matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint must use http or https")
+        );
 
         // URL with credentials
         let url_with_creds = Url::parse("http://user:pass@localhost:8080").unwrap();
         let err = SearchConfig::from_url(url_with_creds).unwrap_err();
-        assert!(matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint credentials are not supported"));
+        assert!(
+            matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint credentials are not supported")
+        );
     }
 
     #[test]
@@ -1165,6 +1172,74 @@ mod tests {
         assert!(
             matches!(error, Error::HttpStatus { status, body } if status == StatusCode::BAD_GATEWAY && body == "upstream bad")
         );
+    }
+
+    #[tokio::test]
+    async fn search_websurfx_reports_decode_and_oversized_responses() {
+        let body = "{not json}";
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let error = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search_websurfx(&WebsurfxQuery::new("rust"))
+            .await
+            .expect_err("invalid JSON must fail");
+        server.join().expect("server thread");
+        assert!(matches!(error, Error::Decode(_)));
+
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            MAX_RESPONSE_BYTES + 1
+        ));
+        let error = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search_websurfx(&WebsurfxQuery::new("rust"))
+            .await
+            .expect_err("oversized responses must fail");
+        server.join().expect("server thread");
+        assert!(matches!(error, Error::ResponseTooLarge));
+    }
+
+    #[tokio::test]
+    async fn search_projects_sparse_searxng_answers_counts_and_sources() {
+        let body = r#"{"answers":[{"content":"From content."},{"text":"From text."}],"results":[{"title":"Rust","url":"https://example.com/rust","content":"A guide."}]}"#;
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let response = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search(&SearchQuery::new("rust"))
+            .await
+            .expect("successful response");
+        server.join().expect("server thread");
+
+        assert_eq!(response.number_of_results, 1);
+        assert_eq!(response.answers, ["From content.", "From text."]);
+        assert_eq!(response.answer.as_deref(), Some("From content."));
+        assert_eq!(response.sources[0].title, "Rust");
+        assert_eq!(response.sources[0].url, "https://example.com/rust");
+    }
+
+    #[tokio::test]
+    async fn local_level4_blocklist_returns_disallowed_empty_response() {
+        let config = SearchConfig::new(DEFAULT_ENDPOINT)
+            .expect("valid endpoint")
+            .with_blocklist(["blocked-term"]);
+        let mut client = SearchClient::from_config(config).expect("client");
+        client.embedded = true;
+        let response = client
+            .search(&SearchQuery::new("blocked-term").with_safe_search(SafeSearch::Level4))
+            .await
+            .expect("disallowed query short-circuits");
+
+        assert!(response.results.is_empty());
+        assert!(response.sources.is_empty());
+        assert!(response.filters.disallowed);
+        assert_eq!(response.number_of_results, 0);
+        assert_eq!(client.cached_entries(), 1);
     }
 
     #[tokio::test]
