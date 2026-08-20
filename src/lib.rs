@@ -774,6 +774,16 @@ impl SearchResult {
             published_date: self.published_date.clone(),
         }
     }
+
+    pub fn into_citation(self) -> Citation {
+        Citation {
+            title: self.title,
+            url: self.url,
+            snippet: self.content,
+            source: self.engine.or_else(|| self.engines.into_iter().next()),
+            published_date: self.published_date,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
