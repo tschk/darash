@@ -1330,9 +1330,7 @@ async fn cache_methods_reflect_and_clear_search_entries() {
             })
             .collect::<Vec<_>>()
             .join(",");
-        let body = format!(
-            r#"{{"query":"rust","number_of_results":15,"results":[{results}]}}"#
-        );
+        let body = format!(r#"{{"query":"rust","number_of_results":15,"results":[{results}]}}"#);
         let (endpoint, server) = spawn_http_server(format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
