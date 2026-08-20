@@ -1071,6 +1071,34 @@ mod tests {
         assert_eq!(response.results[0].url, "");
     }
 
+    #[test]
+    fn cited_sources_returns_sources_fallback_to_citations() {
+        let mut response: SearchResponse = serde_json::from_str(
+            r#"{
+                "results": [{"title":"Rust","url":"https://example.com","content":"A guide.","engine":"brave"}]
+            }"#,
+        )
+        .expect("compatible SearxNG response");
+
+        assert!(response.sources.is_empty());
+        assert_eq!(response.cited_sources(), response.citations());
+        assert_eq!(response.cited_sources().len(), 1);
+        assert_eq!(response.cited_sources()[0].title, "Rust");
+
+        let citation = Citation {
+            title: "Source".to_owned(),
+            url: "https://example.com/source".to_owned(),
+            snippet: "A source snippet".to_owned(),
+            source: None,
+            published_date: None,
+        };
+        response.sources = vec![citation.clone()];
+
+        assert_eq!(response.cited_sources(), response.sources);
+        assert_eq!(response.cited_sources().len(), 1);
+        assert_eq!(response.cited_sources()[0].title, "Source");
+    }
+
     #[tokio::test]
     async fn search_fetches_json_and_reports_http_errors() {
         let body = r#"{"query":"rust","number_of_results":1,"results":[{"title":"Rust","url":"https://example.com/rust","content":"A Rust guide."}]}"#;
