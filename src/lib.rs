@@ -1012,12 +1012,16 @@ mod tests {
         // Invalid scheme
         let invalid_scheme = Url::parse("ftp://localhost:8080").unwrap();
         let err = SearchConfig::from_url(invalid_scheme).unwrap_err();
-        assert!(matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint must use http or https"));
+        assert!(
+            matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint must use http or https")
+        );
 
         // URL with credentials
         let url_with_creds = Url::parse("http://user:pass@localhost:8080").unwrap();
         let err = SearchConfig::from_url(url_with_creds).unwrap_err();
-        assert!(matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint credentials are not supported"));
+        assert!(
+            matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint credentials are not supported")
+        );
     }
 
     #[test]
