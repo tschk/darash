@@ -74,25 +74,10 @@ impl WebsurfxSearchResponse {
             .into_iter()
             .map(WebsurfxSearchResult::into_search_result)
             .collect::<Vec<_>>();
-        let sources = results
-            .iter()
-            .map(SearchResult::citation)
-            .collect::<Vec<Citation>>();
-        let mut provider_counts = BTreeMap::new();
-        for result in &results {
-            for engine in &result.engines {
-                *provider_counts.entry(engine.clone()).or_insert(0) += 1;
-            }
-        }
-        let provider_status = provider_counts
-            .into_iter()
-            .map(|(provider, count)| ProviderStatus::success(provider, count))
-            .chain(
-                self.engine_errors_info
-                    .iter()
-                    .map(|error| ProviderStatus::failed(error.engine.clone(), error.error.clone())),
-            )
-            .collect();
+
+        let sources = Self::extract_citations(&results);
+        let provider_status = Self::compute_provider_status(&results, &self.engine_errors_info);
+
         let safe_search_level = self.safe_search_level;
         let metadata = WebsurfxMetadata {
             engine_errors_info: self.engine_errors_info,
@@ -120,6 +105,34 @@ impl WebsurfxSearchResponse {
             },
         };
         WebsurfxMappedResponse { response, metadata }
+    }
+
+    fn extract_citations(results: &[SearchResult]) -> Vec<Citation> {
+        results
+            .iter()
+            .map(SearchResult::citation)
+            .collect::<Vec<Citation>>()
+    }
+
+    fn compute_provider_status(
+        results: &[SearchResult],
+        engine_errors: &[WebsurfxEngineError],
+    ) -> Vec<ProviderStatus> {
+        let mut provider_counts = BTreeMap::new();
+        for result in results {
+            for engine in &result.engines {
+                *provider_counts.entry(engine.clone()).or_insert(0) += 1;
+            }
+        }
+        provider_counts
+            .into_iter()
+            .map(|(provider, count)| ProviderStatus::success(provider, count))
+            .chain(
+                engine_errors
+                    .iter()
+                    .map(|error| ProviderStatus::failed(error.engine.clone(), error.error.clone())),
+            )
+            .collect()
     }
 }
 
@@ -261,6 +274,21 @@ mod tests {
         assert_eq!(mapped.metadata.engine_errors_info[0].engine, "Bing");
         assert!(mapped.metadata.filtered);
         assert_eq!(mapped.metadata.safe_search_level, 3);
+    }
+
+    #[test]
+    fn gets_websurfx_query_properties() {
+        let query = WebsurfxQuery::new("test query");
+        assert_eq!(query.query(), "test query");
+        assert_eq!(query.page(), None);
+        assert_eq!(query.safe_search(), None);
+
+        let query_with_options = WebsurfxQuery::new("test query")
+            .with_page(1)
+            .with_safe_search(2);
+        assert_eq!(query_with_options.query(), "test query");
+        assert_eq!(query_with_options.page(), Some(1));
+        assert_eq!(query_with_options.safe_search(), Some(2));
     }
 
     #[test]

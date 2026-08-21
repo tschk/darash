@@ -357,7 +357,11 @@ async fn get_body(client: &Client, url: &str) -> Result<String, String> {
         .await
         .map_err(|error| error.to_string())?;
     if !status.is_success() {
-        return Err(format!("HTTP {status}: {}", bounded_error(&body)));
+        log::error!(
+            "provider request failed with HTTP {status}: {}",
+            bounded_error(&body)
+        );
+        return Err(format!("provider request failed: HTTP {status}"));
     }
     Ok(body)
 }
@@ -542,26 +546,36 @@ fn abstract_text(index: Option<std::collections::HashMap<String, Vec<usize>>>) -
 }
 
 fn dedupe_and_rank(query: &str, results: Vec<SearchResult>) -> Vec<SearchResult> {
+    let mut max_len = query.len().min(400);
+    while !query.is_char_boundary(max_len) {
+        max_len -= 1;
+    }
+    let query = &query[..max_len];
+
     let mut merged: BTreeMap<String, SearchResult> = BTreeMap::new();
     for mut result in results {
         let Some(key) = safe_url(&result.url) else {
             continue;
         };
-        result.url = key.clone();
-        if let Some(existing) = merged.get_mut(&key) {
-            for engine in result.engines {
-                if !existing.engines.contains(&engine) {
-                    existing.engines.push(engine);
+        match merged.entry(key) {
+            std::collections::btree_map::Entry::Occupied(mut entry) => {
+                let existing = entry.get_mut();
+                for engine in result.engines {
+                    if !existing.engines.contains(&engine) {
+                        existing.engines.push(engine);
+                    }
+                }
+                if existing.engine.is_none() {
+                    existing.engine = result.engine;
+                }
+                if existing.content.len() < result.content.len() {
+                    existing.content = result.content;
                 }
             }
-            if existing.engine.is_none() {
-                existing.engine = result.engine;
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                result.url = entry.key().clone();
+                entry.insert(result);
             }
-            if existing.content.len() < result.content.len() {
-                existing.content = result.content;
-            }
-        } else {
-            merged.insert(key, result);
         }
     }
     let mut results = merged.into_values().collect::<Vec<_>>();
@@ -595,21 +609,25 @@ fn rank_results(query: &str, results: &mut [SearchResult]) {
         .collect::<Vec<_>>();
     let document_count = documents.len() as f64;
     let query_terms = query_terms.into_iter().collect::<HashSet<_>>();
+    let mut term_idfs = Vec::with_capacity(query_terms.len());
+    for term in &query_terms {
+        let document_frequency = documents
+            .iter()
+            .filter(|document| document.contains(term))
+            .count() as f64;
+        let inverse_document_frequency =
+            ((document_count + 1.0) / (document_frequency + 1.0)).ln() + 1.0;
+        term_idfs.push((term, inverse_document_frequency));
+    }
     for (index, result) in results.iter_mut().enumerate() {
         let title = tokenize(&result.title);
         let content = tokenize(&result.content);
         let url = tokenize(&result.url);
         let mut score = 0.0;
-        for term in &query_terms {
-            let document_frequency = documents
-                .iter()
-                .filter(|document| document.contains(term))
-                .count() as f64;
-            let inverse_document_frequency =
-                ((document_count + 1.0) / (document_frequency + 1.0)).ln() + 1.0;
-            let title_frequency = title.iter().filter(|token| *token == term).count() as f64;
-            let content_frequency = content.iter().filter(|token| *token == term).count() as f64;
-            let url_frequency = url.iter().filter(|token| *token == term).count() as f64;
+        for (term, inverse_document_frequency) in &term_idfs {
+            let title_frequency = title.iter().filter(|token| *token == *term).count() as f64;
+            let content_frequency = content.iter().filter(|token| *token == *term).count() as f64;
+            let url_frequency = url.iter().filter(|token| *token == *term).count() as f64;
             score += inverse_document_frequency
                 * (2.0 * title_frequency / title.len().max(1) as f64
                     + content_frequency / content.len().max(1) as f64
@@ -781,6 +799,53 @@ mod tests {
         let selected = providers(&query);
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].name(), "openalex");
+    }
+
+    #[test]
+    fn provider_selection_uses_aliases_and_falls_back_from_unknown_engines() {
+        let aliased = SearchQuery::new("rust")
+            .with_engines(["ddg", "HN", "academic"])
+            .with_mode(crate::SearchMode::Quality);
+        let selected = providers(&aliased);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|provider| provider.name())
+                .collect::<Vec<_>>(),
+            ["duckduckgo", "hacker-news", "openalex"]
+        );
+
+        let unknown = SearchQuery::new("rust")
+            .with_engines(["bing", "google"])
+            .with_categories("science,social media");
+        let selected = providers(&unknown);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|provider| provider.name())
+                .collect::<Vec<_>>(),
+            ["openalex", "hacker-news"]
+        );
+    }
+
+    #[test]
+    fn dedupe_and_rank_truncates_long_queries_preventing_dos() {
+        let long_query = "a".repeat(1000);
+        let res = result(
+            Provider::Web,
+            "Rust".to_owned(),
+            "https://example.com".to_owned(),
+            "A language".to_owned(),
+            None,
+        );
+        let start = std::time::Instant::now();
+        let ranked = dedupe_and_rank(&long_query, vec![res]);
+        let elapsed = start.elapsed();
+
+        assert_eq!(ranked.len(), 1);
+        // It shouldn't take more than a fraction of a second to process 400 bytes,
+        // vs potentially hanging for a long time if it processed 1000 bytes.
+        assert!(elapsed.as_millis() < 100);
     }
 
     #[test]
