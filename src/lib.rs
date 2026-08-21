@@ -1285,6 +1285,30 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn cache_methods_reflect_and_clear_search_entries() {
+        let body = r#"{"query":"rust","number_of_results":1,"results":[{"title":"Rust","url":"https://example.com/rust","content":"A Rust guide."}]}"#;
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+
+        let client = SearchClient::new(endpoint).expect("valid endpoint");
+        assert_eq!(client.cached_entries(), 0);
+
+        client
+            .search(&SearchQuery::new("rust"))
+            .await
+            .expect("successful response");
+
+        assert_eq!(client.cached_entries(), 1);
+
+        client.clear_cache();
+        assert_eq!(client.cached_entries(), 0);
+
+        server.join().expect("server thread");
+    }
+
     fn spawn_http_server(response: String) -> (String, thread::JoinHandle<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
         let address = listener.local_addr().expect("test server address");
