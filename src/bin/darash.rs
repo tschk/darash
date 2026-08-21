@@ -123,12 +123,7 @@ fn print_response(response: &SearchResponse) {
         println!("{answer}\n");
     }
     for source in response.cited_sources() {
-        let title = if source.title.is_empty() {
-            "(untitled)"
-        } else {
-            &source.title
-        };
-        println!("{title}\n{}\n{}\n", source.url, source.snippet);
+        println!("{source}\n");
     }
 }
 
