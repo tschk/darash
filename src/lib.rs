@@ -490,44 +490,24 @@ impl SearchClient {
         self.cache.len()
     }
 
-    pub async fn search(&self, query: &SearchQuery) -> Result<SearchResponse, Error> {
-        if query.query.trim().is_empty() {
-            return Err(Error::EmptyQuery);
-        }
-        if query.page == Some(0) {
-            return Err(Error::InvalidPage);
-        }
-        query.page_offset(10)?;
-
-        let cache_key = format!(
-            "{}:{}:{}",
-            self.embedded,
-            query.mode().as_str(),
-            query.to_query_string()
-        );
-        if let Some(response) = self.cache.get(&cache_key) {
-            return Ok(response);
-        }
-
-        if self.embedded {
-            let outcome =
-                embedded_search::search_with_outcome(&self.http, query, &self.config).await?;
-            let mut response = outcome.response;
-            for failure in outcome.failures {
-                if !response
+    async fn search_embedded(&self, query: &SearchQuery) -> Result<SearchResponse, Error> {
+        let outcome = embedded_search::search_with_outcome(&self.http, query, &self.config).await?;
+        let mut response = outcome.response;
+        for failure in outcome.failures {
+            if !response
+                .provider_status
+                .iter()
+                .any(|status| status.provider == failure.provider)
+            {
+                response
                     .provider_status
-                    .iter()
-                    .any(|status| status.provider == failure.provider)
-                {
-                    response
-                        .provider_status
-                        .push(ProviderStatus::failed(failure.provider, failure.error));
-                }
+                    .push(ProviderStatus::failed(failure.provider, failure.error));
             }
-            self.cache.insert(cache_key, response.clone());
-            return Ok(response);
         }
+        Ok(response)
+    }
 
+    async fn search_external(&self, query: &SearchQuery) -> Result<SearchResponse, Error> {
         let mut url = self.search_url();
         url.set_query(Some(&query.to_query_string()));
         let response = self.http.get(url).send().await.map_err(Error::Request)?;
@@ -547,6 +527,34 @@ impl SearchClient {
             response.sources = response.citations();
         }
         response.filters = query.filters();
+        Ok(response)
+    }
+
+    pub async fn search(&self, query: &SearchQuery) -> Result<SearchResponse, Error> {
+        if query.query.trim().is_empty() {
+            return Err(Error::EmptyQuery);
+        }
+        if query.page == Some(0) {
+            return Err(Error::InvalidPage);
+        }
+        query.page_offset(10)?;
+
+        let cache_key = format!(
+            "{}:{}:{}",
+            self.embedded,
+            query.mode().as_str(),
+            query.to_query_string()
+        );
+        if let Some(response) = self.cache.get(&cache_key) {
+            return Ok(response);
+        }
+
+        let response = if self.embedded {
+            self.search_embedded(query).await?
+        } else {
+            self.search_external(query).await?
+        };
+
         self.cache.insert(cache_key, response.clone());
         Ok(response)
     }
