@@ -1320,6 +1320,36 @@ mod tests {
         server.join().expect("server thread");
     }
 
+    #[tokio::test]
+    async fn search_request_fetches_json_and_limits_results() {
+        let results = (0..15)
+            .map(|i| {
+                format!(
+                    r#"{{"title":"Result {i}","url":"https://example.com/{i}","content":"Content {i}"}}"#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let body = format!(r#"{{"query":"rust","number_of_results":15,"results":[{results}]}}"#);
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+
+        let response = SearchClient::new(endpoint)
+            .expect("valid endpoint")
+            .search_request(&SearchRequest::new("rust").with_mode(SearchMode::Speed))
+            .await
+            .expect("successful response");
+        let request = server.join().expect("server thread");
+
+        assert!(request.starts_with("GET /search?q=rust&format=json&categories=general HTTP/1.1"));
+        assert_eq!(response.query, "rust");
+        assert_eq!(response.number_of_results, 15);
+        assert_eq!(response.results.len(), 5);
+        assert_eq!(response.sources.len(), 5);
+    }
+
     fn spawn_http_server(response: String) -> (String, thread::JoinHandle<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
         let address = listener.local_addr().expect("test server address");
