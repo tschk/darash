@@ -546,6 +546,12 @@ fn abstract_text(index: Option<std::collections::HashMap<String, Vec<usize>>>) -
 }
 
 fn dedupe_and_rank(query: &str, results: Vec<SearchResult>) -> Vec<SearchResult> {
+    let mut max_len = query.len().min(400);
+    while !query.is_char_boundary(max_len) {
+        max_len -= 1;
+    }
+    let query = &query[..max_len];
+
     let mut merged: BTreeMap<String, SearchResult> = BTreeMap::new();
     for mut result in results {
         let Some(key) = safe_url(&result.url) else {
@@ -820,6 +826,26 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["openalex", "hacker-news"]
         );
+    }
+
+    #[test]
+    fn dedupe_and_rank_truncates_long_queries_preventing_dos() {
+        let long_query = "a".repeat(1000);
+        let res = result(
+            Provider::Web,
+            "Rust".to_owned(),
+            "https://example.com".to_owned(),
+            "A language".to_owned(),
+            None,
+        );
+        let start = std::time::Instant::now();
+        let ranked = dedupe_and_rank(&long_query, vec![res]);
+        let elapsed = start.elapsed();
+
+        assert_eq!(ranked.len(), 1);
+        // It shouldn't take more than a fraction of a second to process 400 bytes,
+        // vs potentially hanging for a long time if it processed 1000 bytes.
+        assert!(elapsed.as_millis() < 100);
     }
 
     #[test]
