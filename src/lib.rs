@@ -1041,8 +1041,7 @@ mod tests {
     #[test]
     fn endpoint_rejects_credentials_and_zero_timeout() -> Result<(), crate::Error> {
         assert!(SearchConfig::new("http://user:pass@localhost:8080").is_err());
-        let config = SearchConfig::new("http://localhost:8080")?
-            .with_timeout(Duration::ZERO);
+        let config = SearchConfig::new("http://localhost:8080")?.with_timeout(Duration::ZERO);
         assert!(SearchClient::from_config(config).is_err());
         Ok(())
     }
