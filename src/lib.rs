@@ -1304,6 +1304,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn clear_cache_removes_all_entries() {
+        let config = SearchConfig::new(DEFAULT_ENDPOINT).expect("valid config");
+        let client = SearchClient::from_config(config).expect("valid client");
+
+        let dummy_response = SearchResponse {
+            query: "rust".to_owned(),
+            number_of_results: 0,
+            results: Vec::new(),
+            answers: Vec::new(),
+            answer: None,
+            sources: Vec::new(),
+            corrections: Vec::new(),
+            suggestions: Vec::new(),
+            provider_status: Vec::new(),
+            filters: SearchFilters::default(),
+        };
+
+        client.cache.insert("rust".to_owned(), dummy_response);
+        assert_eq!(client.cached_entries(), 1);
+
+        client.clear_cache();
+        assert_eq!(client.cached_entries(), 0);
+    }
+
     #[tokio::test]
     async fn cache_methods_reflect_and_clear_search_entries() {
         let body = r#"{"query":"rust","number_of_results":1,"results":[{"title":"Rust","url":"https://example.com/rust","content":"A Rust guide."}]}"#;
