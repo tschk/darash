@@ -1039,55 +1039,59 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_rejects_credentials_and_zero_timeout() {
+    fn endpoint_rejects_credentials_and_zero_timeout() -> Result<(), crate::Error> {
         assert!(SearchConfig::new("http://user:pass@localhost:8080").is_err());
-        let config = SearchConfig::new("http://localhost:8080")
-            .expect("valid endpoint")
+        let config = SearchConfig::new("http://localhost:8080")?
             .with_timeout(Duration::ZERO);
         assert!(SearchClient::from_config(config).is_err());
+        Ok(())
     }
 
     #[test]
-    fn search_config_from_url_validates_scheme_and_credentials() {
+    fn search_config_from_url_validates_scheme_and_credentials() -> Result<(), url::ParseError> {
         // Valid URLs
-        let valid_http = Url::parse("http://localhost:8080").unwrap();
+        let valid_http = Url::parse("http://localhost:8080")?;
         assert!(SearchConfig::from_url(valid_http).is_ok());
 
-        let valid_https = Url::parse("https://example.com/search").unwrap();
+        let valid_https = Url::parse("https://example.com/search")?;
         assert!(SearchConfig::from_url(valid_https).is_ok());
 
         // Invalid scheme
-        let invalid_scheme = Url::parse("ftp://localhost:8080").unwrap();
+        let invalid_scheme = Url::parse("ftp://localhost:8080")?;
         let err = SearchConfig::from_url(invalid_scheme).unwrap_err();
         assert!(
             matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint must use http or https")
         );
 
         // URL with credentials
-        let url_with_creds = Url::parse("http://user:pass@localhost:8080").unwrap();
+        let url_with_creds = Url::parse("http://user:pass@localhost:8080")?;
         let err = SearchConfig::from_url(url_with_creds).unwrap_err();
         assert!(
             matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint credentials are not supported")
         );
+
+        Ok(())
     }
 
     #[test]
-    fn local_client_selects_direct_backend() {
-        let client = SearchClient::local().expect("local backend");
+    fn local_client_selects_direct_backend() -> Result<(), crate::Error> {
+        let client = SearchClient::local()?;
         assert!(client.embedded);
         assert_eq!(
             client.config.endpoint().as_str(),
             format!("{DEFAULT_ENDPOINT}/")
         );
+        Ok(())
     }
 
     #[test]
-    fn local_search_future_is_send() {
+    fn local_search_future_is_send() -> Result<(), crate::Error> {
         fn assert_send<T: Send>(_: T) {}
 
-        let client = SearchClient::local().expect("local backend");
+        let client = SearchClient::local()?;
         let query = SearchQuery::new("rust");
         assert_send(client.search(&query));
+        Ok(())
     }
 
     #[test]
