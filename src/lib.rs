@@ -1048,6 +1048,25 @@ mod tests {
     }
 
     #[test]
+    fn search_config_builder_methods_populate_fields() {
+        let config = SearchConfig::new("https://example.com")
+            .unwrap()
+            .with_blocklist(["badsite.com", "spam.org"])
+            .with_allowlist(["goodsite.com"])
+            .with_timeout(std::time::Duration::from_secs(10))
+            .with_cache(100, std::time::Duration::from_secs(300));
+
+        assert_eq!(
+            config.blocklist,
+            vec!["badsite.com".to_owned(), "spam.org".to_owned()]
+        );
+        assert_eq!(config.allowlist, vec!["goodsite.com".to_owned()]);
+        assert_eq!(config.timeout, std::time::Duration::from_secs(10));
+        assert_eq!(config.cache_capacity, 100);
+        assert_eq!(config.cache_ttl, std::time::Duration::from_secs(300));
+    }
+
+    #[test]
     fn search_config_from_url_validates_scheme_and_credentials() {
         // Valid URLs
         let valid_http = Url::parse("http://localhost:8080").unwrap();
