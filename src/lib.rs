@@ -892,6 +892,19 @@ mod tests {
     }
 
     #[test]
+    fn time_range_as_str_and_value_are_correct() {
+        assert_eq!(TimeRange::Day.as_str(), "day");
+        assert_eq!(TimeRange::Week.as_str(), "week");
+        assert_eq!(TimeRange::Month.as_str(), "month");
+        assert_eq!(TimeRange::Year.as_str(), "year");
+
+        assert_eq!(TimeRange::Day.value(), "day");
+        assert_eq!(TimeRange::Week.value(), "week");
+        assert_eq!(TimeRange::Month.value(), "month");
+        assert_eq!(TimeRange::Year.value(), "year");
+    }
+
+    #[test]
     fn safe_search_supports_levels_zero_through_four() {
         for level in 0..=4 {
             assert_eq!(
