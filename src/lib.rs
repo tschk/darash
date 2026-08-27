@@ -1048,6 +1048,17 @@ mod tests {
     }
 
     #[test]
+    fn search_config_with_cache_updates_capacity_and_ttl() {
+        let config = SearchConfig::new("http://localhost:8080")
+            .expect("valid endpoint")
+            .with_cache(128, Duration::from_secs(120));
+
+        let (capacity, ttl) = config.cache_settings();
+        assert_eq!(capacity, 128);
+        assert_eq!(ttl, Duration::from_secs(120));
+    }
+
+    #[test]
     fn search_config_from_url_validates_scheme_and_credentials() {
         // Valid URLs
         let valid_http = Url::parse("http://localhost:8080").unwrap();
