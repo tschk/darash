@@ -88,7 +88,7 @@ impl TimeRange {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SearchMode {
     Speed,
@@ -447,7 +447,7 @@ pub struct SearchClient {
     http: reqwest::Client,
     config: SearchConfig,
     embedded: bool,
-    cache: cache::TtlCache<String, SearchResponse>,
+    cache: cache::TtlCache<(bool, SearchMode, String), SearchResponse>,
 }
 
 impl SearchClient {
@@ -539,12 +539,7 @@ impl SearchClient {
         }
         query.page_offset(10)?;
 
-        let cache_key = format!(
-            "{}:{}:{}",
-            self.embedded,
-            query.mode().as_str(),
-            query.to_query_string()
-        );
+        let cache_key = (self.embedded, query.mode(), query.to_query_string());
         if let Some(response) = self.cache.get(&cache_key) {
             return Ok(response);
         }
