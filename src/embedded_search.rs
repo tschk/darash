@@ -537,12 +537,15 @@ fn abstract_text(index: Option<std::collections::HashMap<String, Vec<usize>>>) -
         })
         .collect::<Vec<_>>();
     words.sort_by_key(|(position, _)| *position);
-    words
-        .into_iter()
-        .take(48)
-        .map(|(_, word)| word)
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut iter = words.into_iter().take(48).map(|(_, word)| word);
+    match iter.next() {
+        Some(first) => iter.fold(first, |mut acc, word| {
+            acc.push(' ');
+            acc.push_str(&word);
+            acc
+        }),
+        None => String::new(),
+    }
 }
 
 fn dedupe_and_rank(query: &str, results: Vec<SearchResult>) -> Vec<SearchResult> {
