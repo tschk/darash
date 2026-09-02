@@ -292,6 +292,18 @@ mod tests {
     }
 
     #[test]
+    fn sets_safe_search_level_on_query() {
+        let query = WebsurfxQuery::new("test query").with_safe_search(4);
+        assert_eq!(query.safe_search(), Some(4));
+    }
+
+    #[test]
+    fn sets_page_on_query() {
+        let query = WebsurfxQuery::new("test query").with_page(2);
+        assert_eq!(query.page(), Some(2));
+    }
+
+    #[test]
     fn builds_websurfx_search_url() {
         let query = WebsurfxQuery::new("rust async")
             .with_page(2)
