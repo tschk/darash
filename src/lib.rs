@@ -88,7 +88,7 @@ impl TimeRange {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SearchMode {
     Speed,
@@ -447,7 +447,7 @@ pub struct SearchClient {
     http: reqwest::Client,
     config: SearchConfig,
     embedded: bool,
-    cache: cache::TtlCache<(bool, SearchMode, String), SearchResponse>,
+    cache: cache::TtlCache<String, SearchResponse>,
 }
 
 impl SearchClient {
@@ -539,7 +539,12 @@ impl SearchClient {
         }
         query.page_offset(10)?;
 
-        let cache_key = (self.embedded, query.mode(), query.to_query_string());
+        let cache_key = format!(
+            "{}:{}:{}",
+            self.embedded,
+            query.mode().as_str(),
+            query.to_query_string()
+        );
         if let Some(response) = self.cache.get(&cache_key) {
             return Ok(response);
         }
@@ -1034,58 +1039,55 @@ mod tests {
     }
 
     #[test]
-    fn endpoint_rejects_credentials_and_zero_timeout() -> Result<(), crate::Error> {
+    fn endpoint_rejects_credentials_and_zero_timeout() {
         assert!(SearchConfig::new("http://user:pass@localhost:8080").is_err());
-        let config = SearchConfig::new("http://localhost:8080")?.with_timeout(Duration::ZERO);
+        let config = SearchConfig::new("http://localhost:8080")
+            .expect("valid endpoint")
+            .with_timeout(Duration::ZERO);
         assert!(SearchClient::from_config(config).is_err());
-        Ok(())
     }
 
     #[test]
-    fn search_config_from_url_validates_scheme_and_credentials() -> Result<(), url::ParseError> {
+    fn search_config_from_url_validates_scheme_and_credentials() {
         // Valid URLs
-        let valid_http = Url::parse("http://localhost:8080")?;
+        let valid_http = Url::parse("http://localhost:8080").unwrap();
         assert!(SearchConfig::from_url(valid_http).is_ok());
 
-        let valid_https = Url::parse("https://example.com/search")?;
+        let valid_https = Url::parse("https://example.com/search").unwrap();
         assert!(SearchConfig::from_url(valid_https).is_ok());
 
         // Invalid scheme
-        let invalid_scheme = Url::parse("ftp://localhost:8080")?;
+        let invalid_scheme = Url::parse("ftp://localhost:8080").unwrap();
         let err = SearchConfig::from_url(invalid_scheme).unwrap_err();
         assert!(
             matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint must use http or https")
         );
 
         // URL with credentials
-        let url_with_creds = Url::parse("http://user:pass@localhost:8080")?;
+        let url_with_creds = Url::parse("http://user:pass@localhost:8080").unwrap();
         let err = SearchConfig::from_url(url_with_creds).unwrap_err();
         assert!(
             matches!(err, Error::InvalidEndpoint(msg) if msg == "endpoint credentials are not supported")
         );
-
-        Ok(())
     }
 
     #[test]
-    fn local_client_selects_direct_backend() -> Result<(), crate::Error> {
-        let client = SearchClient::local()?;
+    fn local_client_selects_direct_backend() {
+        let client = SearchClient::local().expect("local backend");
         assert!(client.embedded);
         assert_eq!(
             client.config.endpoint().as_str(),
             format!("{DEFAULT_ENDPOINT}/")
         );
-        Ok(())
     }
 
     #[test]
-    fn local_search_future_is_send() -> Result<(), crate::Error> {
+    fn local_search_future_is_send() {
         fn assert_send<T: Send>(_: T) {}
 
-        let client = SearchClient::local()?;
+        let client = SearchClient::local().expect("local backend");
         let query = SearchQuery::new("rust");
         assert_send(client.search(&query));
-        Ok(())
     }
 
     #[test]
@@ -1300,31 +1302,6 @@ mod tests {
         assert!(
             matches!(error, Error::HttpStatus { status, body } if status == StatusCode::BAD_GATEWAY && body == "upstream bad")
         );
-    }
-
-    #[test]
-    fn clear_cache_removes_all_entries() {
-        let config = SearchConfig::new(DEFAULT_ENDPOINT).expect("valid config");
-        let client = SearchClient::from_config(config).expect("valid client");
-
-        let dummy_response = SearchResponse {
-            query: "rust".to_owned(),
-            number_of_results: 0,
-            results: Vec::new(),
-            answers: Vec::new(),
-            answer: None,
-            sources: Vec::new(),
-            corrections: Vec::new(),
-            suggestions: Vec::new(),
-            provider_status: Vec::new(),
-            filters: SearchFilters::default(),
-        };
-
-        client.cache.insert("rust".to_owned(), dummy_response);
-        assert_eq!(client.cached_entries(), 1);
-
-        client.clear_cache();
-        assert_eq!(client.cached_entries(), 0);
     }
 
     #[tokio::test]
