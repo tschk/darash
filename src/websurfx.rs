@@ -121,7 +121,7 @@ impl WebsurfxSearchResponse {
         let mut provider_counts = BTreeMap::new();
         for result in results {
             for engine in &result.engines {
-                *provider_counts.entry(engine.clone()).or_insert(0) += 1;
+                *provider_counts.entry(engine.as_str()).or_insert(0) += 1;
             }
         }
         provider_counts
