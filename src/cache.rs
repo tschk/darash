@@ -129,8 +129,9 @@ where
     K: Eq,
 {
     if let Some(index) = order.iter().position(|current| current == key) {
-        let k = order.remove(index).unwrap();
-        order.push_back(k);
+        if let Some(k) = order.remove(index) {
+            order.push_back(k);
+        }
     }
 }
 
