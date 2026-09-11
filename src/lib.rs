@@ -1344,7 +1344,10 @@ mod tests {
             filters: SearchFilters::default(),
         };
 
-        client.cache.insert("rust".to_owned(), dummy_response);
+        client.cache.insert(
+            (false, SearchMode::Balanced, "rust".to_owned()),
+            dummy_response,
+        );
         assert_eq!(client.cached_entries(), 1);
 
         client.clear_cache();
