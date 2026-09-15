@@ -527,21 +527,21 @@ fn text<'a>(parts: impl Iterator<Item = &'a str>) -> String {
 }
 
 fn abstract_text(index: Option<std::collections::HashMap<String, Vec<usize>>>) -> String {
+    let index = index.unwrap_or_default();
     let mut words = index
-        .unwrap_or_default()
-        .into_iter()
+        .iter()
         .flat_map(|(word, positions)| {
             positions
-                .into_iter()
-                .map(move |position| (position, word.clone()))
+                .iter()
+                .map(move |&position| (position, word.as_str()))
         })
         .collect::<Vec<_>>();
-    words.sort_by_key(|(position, _)| *position);
+    words.sort_unstable_by_key(|(position, _)| *position);
     let mut iter = words.into_iter().take(48).map(|(_, word)| word);
     match iter.next() {
-        Some(first) => iter.fold(first, |mut acc, word| {
+        Some(first) => iter.fold(first.to_owned(), |mut acc, word| {
             acc.push(' ');
-            acc.push_str(&word);
+            acc.push_str(word);
             acc
         }),
         None => String::new(),
