@@ -300,7 +300,7 @@ fn parse_openalex(body: &str, provider: Provider) -> Result<Vec<SearchResult>, S
                 }
                 snippet.push_str(&year.to_string());
             }
-            Some(result(provider, title, url, snippet, work.publication_date))
+            result(provider, title, url, snippet, work.publication_date)
         })
         .collect())
 }
@@ -334,13 +334,13 @@ fn parse_hacker_news(body: &str, provider: Provider) -> Result<Vec<SearchResult>
                 .title
                 .or(hit.story_title)
                 .unwrap_or_else(|| "Untitled discussion".to_owned());
-            Some(result(
+            result(
                 provider,
                 title,
                 url,
                 hit.story_text.or(hit.comment_text).unwrap_or_default(),
                 hit.created_at,
-            ))
+            )
         })
         .collect())
 }
@@ -456,7 +456,7 @@ fn parse_duckduckgo(body: &str, provider: Provider) -> Result<Vec<SearchResult>,
                 .next()
                 .map(|element| text(element.text()))
                 .unwrap_or_default();
-            Some(result(provider, title, url, snippet, None))
+            result(provider, title, url, snippet, None)
         })
         .collect())
 }
@@ -493,8 +493,9 @@ fn result(
     url: String,
     snippet: String,
     published_date: Option<String>,
-) -> SearchResult {
-    SearchResult {
+) -> Option<SearchResult> {
+    let url = super::is_http_url(&url).then_some(url)?;
+    Some(SearchResult {
         title: clean_text(&title),
         url,
         content: clean_text(&snippet),
@@ -503,7 +504,7 @@ fn result(
         category: Some(provider.category().to_owned()),
         published_date,
         score: None,
-    }
+    })
 }
 
 fn clean_text(raw: &str) -> String {
@@ -527,17 +528,31 @@ fn text<'a>(parts: impl Iterator<Item = &'a str>) -> String {
 }
 
 fn abstract_text(index: Option<std::collections::HashMap<String, Vec<usize>>>) -> String {
+    const MAX_ABSTRACT_ENTRIES: usize = 256;
+    const MAX_ABSTRACT_POSITIONS: usize = 512;
+    const MAX_ABSTRACT_WORDS: usize = 48;
+
     let index = index.unwrap_or_default();
-    let mut words = index
-        .iter()
-        .flat_map(|(word, positions)| {
-            positions
-                .iter()
-                .map(move |&position| (position, word.as_str()))
-        })
-        .collect::<Vec<_>>();
+    let mut words = Vec::new();
+    for (word, positions) in index.iter().take(MAX_ABSTRACT_ENTRIES) {
+        for &position in positions
+            .iter()
+            .take(MAX_ABSTRACT_POSITIONS.saturating_sub(words.len()))
+        {
+            words.push((position, word.as_str()));
+            if words.len() >= MAX_ABSTRACT_POSITIONS {
+                break;
+            }
+        }
+        if words.len() >= MAX_ABSTRACT_POSITIONS {
+            break;
+        }
+    }
     words.sort_unstable_by_key(|(position, _)| *position);
-    let mut iter = words.into_iter().take(48).map(|(_, word)| word);
+    let mut iter = words
+        .into_iter()
+        .take(MAX_ABSTRACT_WORDS)
+        .map(|(_, word)| word);
     match iter.next() {
         Some(first) => iter.fold(first.to_owned(), |mut acc, word| {
             acc.push(' ');
@@ -732,14 +747,16 @@ mod tests {
             "https://example.com/guide#top".to_owned(),
             "guide".to_owned(),
             None,
-        );
+        )
+        .expect("http url");
         let second = result(
             Provider::Academic,
             "Rust guide".to_owned(),
             "https://example.com/guide".to_owned(),
             "longer guide".to_owned(),
             None,
-        );
+        )
+        .expect("http url");
         let merged = dedupe_and_rank("rust", vec![first, second]);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].engines, ["duckduckgo", "openalex"]);
@@ -756,6 +773,38 @@ mod tests {
         assert_eq!(results[0].title, "Rust");
         assert_eq!(results[0].content, "A language");
         assert_eq!(results[0].url, "https://example.com/rust");
+    }
+
+    #[test]
+    fn result_rejects_non_http_urls() {
+        assert!(result(
+            Provider::Academic,
+            "bad".to_owned(),
+            "javascript:alert(1)".to_owned(),
+            "snippet".to_owned(),
+            None,
+        )
+        .is_none());
+        assert!(result(
+            Provider::Academic,
+            "file".to_owned(),
+            "file:///etc/passwd".to_owned(),
+            "snippet".to_owned(),
+            None,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn abstract_text_bounds_oversized_inverted_index() {
+        let mut index = std::collections::HashMap::new();
+        for i in 0..10_000 {
+            index.insert(format!("w{i}"), vec![i; 64]);
+        }
+        let start = std::time::Instant::now();
+        let text = abstract_text(Some(index));
+        assert!(start.elapsed().as_millis() < 100);
+        assert!(text.split_whitespace().count() <= 48);
     }
 
     #[test]
@@ -840,7 +889,8 @@ mod tests {
             "https://example.com".to_owned(),
             "A language".to_owned(),
             None,
-        );
+        )
+        .expect("http url");
         let start = std::time::Instant::now();
         let ranked = dedupe_and_rank(&long_query, vec![res]);
         let elapsed = start.elapsed();
@@ -862,14 +912,16 @@ mod tests {
                     "https://example.com/guide".to_owned(),
                     "async Rust futures".to_owned(),
                     None,
-                ),
+                )
+                .expect("http url"),
                 result(
                     Provider::Web,
                     "The guide".to_owned(),
                     "https://example.com/other".to_owned(),
                     "A guide about programming".to_owned(),
                     None,
-                ),
+                )
+                .expect("http url"),
             ],
         );
         assert!(results[0].score.unwrap_or_default() > results[1].score.unwrap_or_default());

@@ -19,6 +19,8 @@ pub use websurfx::{
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:8080";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
+pub const MAX_QUERY_CHARS: usize = 512;
+pub const MAX_ERROR_BODY_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -514,9 +516,13 @@ impl SearchClient {
         let status = response.status();
         let body = read_response_body(response).await?;
         if !status.is_success() {
-            return Err(Error::HttpStatus { status, body });
+            return Err(Error::HttpStatus {
+                status,
+                body: truncate_error_body(body),
+            });
         }
         let mut response: SearchResponse = serde_json::from_str(&body).map_err(Error::Decode)?;
+        retain_http_results(&mut response);
         if response.number_of_results == 0 {
             response.number_of_results = response.results.len() as u64;
         }
@@ -533,6 +539,9 @@ impl SearchClient {
     pub async fn search(&self, query: &SearchQuery) -> Result<SearchResponse, Error> {
         if query.query.trim().is_empty() {
             return Err(Error::EmptyQuery);
+        }
+        if query.query.chars().count() > MAX_QUERY_CHARS {
+            return Err(Error::QueryTooLong);
         }
         if query.page == Some(0) {
             return Err(Error::InvalidPage);
@@ -567,17 +576,29 @@ impl SearchClient {
         if query.query().trim().is_empty() {
             return Err(Error::EmptyQuery);
         }
+        if query.query().chars().count() > MAX_QUERY_CHARS {
+            return Err(Error::QueryTooLong);
+        }
+        if query.page() == Some(0) {
+            return Err(Error::InvalidPage);
+        }
         let url = websurfx::build_search_url(self.config.endpoint(), query)
             .map_err(|error| Error::InvalidEndpoint(error.to_string()))?;
         let response = self.http.get(url).send().await.map_err(Error::Request)?;
         let status = response.status();
         let body = read_response_body(response).await?;
         if !status.is_success() {
-            return Err(Error::HttpStatus { status, body });
+            return Err(Error::HttpStatus {
+                status,
+                body: truncate_error_body(body),
+            });
         }
         let response: WebsurfxSearchResponse =
             serde_json::from_str(&body).map_err(Error::Decode)?;
-        Ok(response.into_search_response(query.query()))
+        let mut mapped = response.into_search_response(query.query());
+        retain_http_results(&mut mapped.response);
+        mapped.metadata.filtered |= mapped.response.filters.filtered;
+        Ok(mapped)
     }
 
     fn search_url(&self) -> Url {
@@ -599,6 +620,35 @@ fn limit_response(response: &mut SearchResponse, mode: SearchMode) {
     let limit = mode.result_limit();
     response.results.truncate(limit);
     response.sources.truncate(limit);
+}
+
+fn retain_http_results(response: &mut SearchResponse) {
+    let before = response.results.len();
+    response.results.retain(|result| is_http_url(&result.url));
+    if response.results.len() != before {
+        response.filters.filtered = true;
+        response.sources = response.citations();
+        if response.number_of_results == before as u64 {
+            response.number_of_results = response.results.len() as u64;
+        }
+    }
+}
+
+pub(crate) fn is_http_url(raw: &str) -> bool {
+    Url::parse(raw)
+        .ok()
+        .is_some_and(|url| matches!(url.scheme(), "http" | "https"))
+}
+
+fn truncate_error_body(body: String) -> String {
+    if body.len() <= MAX_ERROR_BODY_BYTES {
+        return body;
+    }
+    let mut end = MAX_ERROR_BODY_BYTES;
+    while end > 0 && !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    body[..end].to_owned()
 }
 
 async fn read_response_body(response: reqwest::Response) -> Result<String, Error> {
@@ -820,6 +870,8 @@ pub enum Error {
     InvalidTimeout,
     #[error("query must not be empty")]
     EmptyQuery,
+    #[error("query exceeds {MAX_QUERY_CHARS} characters")]
+    QueryTooLong,
     #[error("page must be at least 1")]
     InvalidPage,
     #[error("page is too large for the provider offset")]
@@ -1071,6 +1123,57 @@ mod tests {
         assert_eq!(config.timeout, std::time::Duration::from_secs(10));
         assert_eq!(config.cache_capacity, 100);
         assert_eq!(config.cache_ttl, std::time::Duration::from_secs(300));
+    }
+
+    #[test]
+    fn truncate_error_body_stays_within_byte_limit() {
+        let oversized = "é".repeat((MAX_ERROR_BODY_BYTES / 2) + 8);
+        let truncated = truncate_error_body(oversized);
+        assert!(truncated.len() <= MAX_ERROR_BODY_BYTES);
+        assert!(truncated.is_char_boundary(truncated.len()));
+    }
+
+    #[test]
+    fn retain_http_results_drops_javascript_and_file_urls() {
+        let mut response = SearchResponse {
+            query: "rust".to_owned(),
+            number_of_results: 2,
+            results: vec![
+                SearchResult {
+                    title: "ok".to_owned(),
+                    url: "https://example.com/rust".to_owned(),
+                    content: "guide".to_owned(),
+                    engine: None,
+                    engines: Vec::new(),
+                    category: None,
+                    published_date: None,
+                    score: None,
+                },
+                SearchResult {
+                    title: "bad".to_owned(),
+                    url: "javascript:alert(1)".to_owned(),
+                    content: "xss".to_owned(),
+                    engine: None,
+                    engines: Vec::new(),
+                    category: None,
+                    published_date: None,
+                    score: None,
+                },
+            ],
+            answers: Vec::new(),
+            answer: None,
+            sources: Vec::new(),
+            corrections: Vec::new(),
+            suggestions: Vec::new(),
+            provider_status: Vec::new(),
+            filters: SearchFilters::default(),
+        };
+        retain_http_results(&mut response);
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].url, "https://example.com/rust");
+        assert_eq!(response.number_of_results, 1);
+        assert!(response.filters.filtered);
+        assert_eq!(response.sources.len(), 1);
     }
 
     #[test]
