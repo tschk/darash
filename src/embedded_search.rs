@@ -13,7 +13,7 @@ const DUCKDUCKGO_ENDPOINT: &str = "https://html.duckduckgo.com/html/";
 const OPENALEX_ENDPOINT: &str = "https://api.openalex.org/works";
 const HACKER_NEWS_ENDPOINT: &str = "https://hn.algolia.com/api/v1/search";
 const RESULTS_PER_PROVIDER: usize = 10;
-const USER_AGENT: &str = "darash-search/0.3";
+const USER_AGENT: &str = "darash-search/0.5";
 const MAX_PROVIDER_ERROR_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
