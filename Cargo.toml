@@ -1,6 +1,6 @@
 [package]
 name = "darash"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 license = "ISC"
 description = "Provider-neutral async client with an in-process search engine and SearxNG support"
@@ -10,6 +10,7 @@ categories = ["api-bindings", "web-programming::http-client"]
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+native-tls = "0.2"
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

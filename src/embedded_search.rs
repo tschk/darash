@@ -3,13 +3,17 @@ use crate::{
     TimeRange,
 };
 use futures_util::future::join_all;
+use native_tls::TlsConnector;
 use reqwest::Client;
 use scraper::{Html, Selector};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashSet};
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::time::Duration;
 use url::{form_urlencoded, Url};
 
-const DUCKDUCKGO_ENDPOINT: &str = "https://html.duckduckgo.com/html/";
+const DUCKDUCKGO_HOST: &str = "html.duckduckgo.com";
 const OPENALEX_ENDPOINT: &str = "https://api.openalex.org/works";
 const HACKER_NEWS_ENDPOINT: &str = "https://hn.algolia.com/api/v1/search";
 const RESULTS_PER_PROVIDER: usize = 10;
@@ -242,14 +246,17 @@ async fn fetch_provider(
 }
 
 async fn fetch_web(
-    client: &Client,
+    _client: &Client,
     provider: Provider,
     query: &SearchQuery,
 ) -> Result<Vec<SearchResult>, ProviderFailure> {
     let params = duckduckgo_params(query).map_err(|error| ProviderFailure::new(provider, error))?;
-    let url = format!("{DUCKDUCKGO_ENDPOINT}?{params}");
-    let body = get_body(client, &url)
+    // reqwest/rustls GET and POST receive HTTP 202 bot-challenge pages from
+    // html.duckduckgo.com. A blocking OpenSSL POST matches Python urllib and
+    // returns real HTML results.
+    let body = tokio::task::spawn_blocking(move || duckduckgo_post(&params))
         .await
+        .map_err(|error| ProviderFailure::new(provider, error.to_string()))?
         .map_err(|error| ProviderFailure::new(provider, error))?;
     let mut results =
         parse_duckduckgo(&body, provider).map_err(|error| ProviderFailure::new(provider, error))?;
@@ -345,6 +352,82 @@ fn parse_hacker_news(body: &str, provider: Provider) -> Result<Vec<SearchResult>
         .collect())
 }
 
+fn duckduckgo_post(form: &str) -> Result<String, String> {
+    let connector = TlsConnector::new().map_err(|error| error.to_string())?;
+    let stream = TcpStream::connect((DUCKDUCKGO_HOST, 443)).map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(15)))
+        .map_err(|error| error.to_string())?;
+    let mut stream = connector
+        .connect(DUCKDUCKGO_HOST, stream)
+        .map_err(|error| error.to_string())?;
+    let request = format!(
+        "POST /html/ HTTP/1.1\r\nHost: {DUCKDUCKGO_HOST}\r\nUser-Agent: {USER_AGENT}\r\nAccept: text/html\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{form}",
+        form.len()
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let mut buf = Vec::new();
+    stream
+        .read_to_end(&mut buf)
+        .map_err(|error| error.to_string())?;
+    if buf.len() > crate::MAX_RESPONSE_BYTES + 16 * 1024 {
+        return Err("search response exceeded the byte limit".to_owned());
+    }
+    let header_end = buf
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| "invalid HTTP response".to_owned())?;
+    let headers = std::str::from_utf8(&buf[..header_end]).map_err(|error| error.to_string())?;
+    let status_line = headers.lines().next().unwrap_or_default();
+    if !status_line.contains(" 200 ") {
+        return Err(format!("provider request failed: {}", status_line.trim()));
+    }
+    let body = decode_http_body(headers, &buf[header_end + 4..])?;
+    if body.len() > crate::MAX_RESPONSE_BYTES {
+        return Err("search response exceeded the byte limit".to_owned());
+    }
+    String::from_utf8(body).map_err(|error| error.to_string())
+}
+
+fn decode_http_body(headers: &str, body: &[u8]) -> Result<Vec<u8>, String> {
+    let chunked = headers.lines().any(|line| {
+        let line = line.to_ascii_lowercase();
+        line.starts_with("transfer-encoding:") && line.contains("chunked")
+    });
+    if !chunked {
+        return Ok(body.to_vec());
+    }
+    let mut rest = body;
+    let mut decoded = Vec::new();
+    loop {
+        let split = rest
+            .windows(2)
+            .position(|window| window == b"\r\n")
+            .ok_or_else(|| "invalid chunked encoding".to_owned())?;
+        let size_line = std::str::from_utf8(&rest[..split]).map_err(|error| error.to_string())?;
+        let size =
+            usize::from_str_radix(size_line.trim(), 16).map_err(|error| error.to_string())?;
+        rest = &rest[split + 2..];
+        if size == 0 {
+            break;
+        }
+        if rest.len() < size + 2 {
+            return Err("truncated chunked encoding".to_owned());
+        }
+        decoded.extend_from_slice(&rest[..size]);
+        rest = &rest[size..];
+        rest = rest
+            .strip_prefix(b"\r\n")
+            .ok_or_else(|| "invalid chunked encoding".to_owned())?;
+    }
+    Ok(decoded)
+}
+
 async fn get_body(client: &Client, url: &str) -> Result<String, String> {
     let response = client
         .get(url)
@@ -356,7 +439,9 @@ async fn get_body(client: &Client, url: &str) -> Result<String, String> {
     let body = super::read_response_body(response)
         .await
         .map_err(|error| error.to_string())?;
-    if !status.is_success() {
+    // html.duckduckgo.com returns HTTP 202 + a bot-challenge page (no results)
+    // for some TLS stacks; treat that as a failed fetch, not empty success.
+    if !status.is_success() || status == reqwest::StatusCode::ACCEPTED {
         log::error!(
             "provider request failed with HTTP {status}: {}",
             bounded_error(&body)
@@ -761,6 +846,18 @@ mod tests {
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].engines, ["duckduckgo", "openalex"]);
         assert_eq!(merged[0].content, "longer guide");
+    }
+
+    #[test]
+    fn decodes_chunked_and_identity_http_bodies() {
+        let identity = decode_http_body("Content-Length: 5\r\n", b"hello").expect("identity");
+        assert_eq!(identity, b"hello");
+        let chunked = decode_http_body(
+            "Transfer-Encoding: chunked\r\n",
+            b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n",
+        )
+        .expect("chunked");
+        assert_eq!(chunked, b"hello world");
     }
 
     #[test]
