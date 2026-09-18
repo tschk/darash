@@ -29,9 +29,11 @@ app.get("/", (c) =>
   c.json({
     service: "darash-api",
     crate: "https://crates.io/crates/darash",
+    version: "0.7.0",
     endpoints: {
       "GET /search": "q, mode=speed|balanced|quality, sources=web,academic,discussions, url, json",
-      "GET /fetch": "url, md, text, outline, select, row, table, body, limit, budget, header, json",
+      "GET /fetch":
+        "url, md, text, outline, select, row, table, body, locate, count, where, offset, limit, budget, header, json, jsonEnvelope, tsv, all, fresh, noCache, method, data, user, head, maxTime, maxBytes, fail",
       "GET /health": "liveness",
     },
   }),
@@ -66,20 +68,49 @@ app.get("/fetch", (c) => {
   if (!url || !url.trim()) return c.json({ error: "url is required" }, 400);
 
   const flags: Flag[] = [];
-  if (c.req.query("md") !== undefined) flags.push({ name: "--md" });
-  if (c.req.query("text") !== undefined) flags.push({ name: "--text" });
-  if (c.req.query("outline") !== undefined) flags.push({ name: "--outline" });
-  if (c.req.query("table") !== undefined) flags.push({ name: "--table" });
-  if (c.req.query("body") !== undefined) flags.push({ name: "--body" });
-  if (c.req.query("select")) flags.push({ name: "--select", value: c.req.query("select")! });
-  if (c.req.query("row")) flags.push({ name: "--row", value: c.req.query("row")! });
-  if (c.req.query("limit")) flags.push({ name: "--limit", value: c.req.query("limit")! });
-  if (c.req.query("budget")) flags.push({ name: "--budget", value: c.req.query("budget")! });
+  const on = (name: string, query: string) => {
+    if (c.req.query(query) !== undefined) flags.push({ name });
+  };
+  on("--md", "md");
+  on("--text", "text");
+  on("--outline", "outline");
+  on("--table", "table");
+  on("--body", "body");
+  on("--count", "count");
+  on("--tsv", "tsv");
+  on("--all", "all");
+  on("--fresh", "fresh");
+  on("--no-cache", "noCache");
+  on("--head", "head");
+  on("--fail", "fail");
+  if (c.req.query("jsonEnvelope") !== undefined) {
+    flags.push({ name: "--json-envelope" });
+  } else {
+    flags.push({ name: "--json" });
+  }
+  const valued: [string, string][] = [
+    ["--select", "select"],
+    ["--row", "row"],
+    ["--limit", "limit"],
+    ["--budget", "budget"],
+    ["--offset", "offset"],
+    ["--where", "where"],
+    ["--locate", "locate"],
+    ["--method", "method"],
+    ["--data", "data"],
+    ["--user", "user"],
+    ["--max-time", "maxTime"],
+    ["--max-bytes", "maxBytes"],
+  ];
+  for (const [name, query] of valued) {
+    const value = c.req.query(query);
+    if (value) flags.push({ name, value });
+  }
   for (const header of parseList(c.req.query("header"))) {
     flags.push({ name: "--header", value: header });
   }
 
-  const args = ["fetch", url, "--json"];
+  const args = ["fetch", url];
   for (const flag of flags) {
     args.push(flag.name);
     if (flag.value !== undefined) args.push(flag.value);
@@ -89,7 +120,7 @@ app.get("/fetch", (c) => {
   const { code, stdout, stderr } = run(args);
   const ms = Date.now() - started;
   if (code !== 0) {
-    return c.json({ error: "fetch failed", detail: stderr }, 502);
+    return c.json({ error: "fetch failed", detail: stderr }, code === 22 ? 422 : 502);
   }
   const parsed = JSON.parse(stdout);
   return c.json({ ...parsed, meta: { ...(parsed.meta ?? {}), ms } });
