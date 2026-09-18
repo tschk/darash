@@ -16,6 +16,8 @@ CLI (ships with the crate, `cargo install darash`):
 - Cache: fetched URL bodies are cached ~2 min under the user cache dir and reused by parse modes; bypassed by custom headers, non-`GET` methods, request bodies, `Cache-Control: no-store`, and credential-bearing URLs; `--fresh` refetches and re-caches, `--no-cache` never reads or writes. Hits announce their age on stderr.
 - Fetch prints the full report as JSON by default (including the body); `--body` prints only the body; extraction modes print data on stdout and a one-line report plus omission/pagination notes on stderr. Rows and single tables default to TSV, `--json` switches them to JSON rows, and multiple tables always print JSON. `--json` wraps any mode as `{"data": …, "meta": {status, ok, url, ms, bytes, count, omitted}}`; `--json-envelope` prints `{"data": …, "meta": {state, total, offset, returned, next_offset}}`.
 
+Hosted API: https://darash.tsc.hk exposes the same search + fetch loop over HTTP — `GET /api/health`, `GET /api/search?q=&mode=&limit=`, `GET /api/fetch?url=&md=1&select=&limit=`, and `GET /api/stats`.
+
 Limits: 15 s search timeout (configurable via `SearchConfig::with_timeout`), 256 KiB search response cap, 2 MiB fetch body cap (override with `--max-bytes`), queries ≤ 512 chars, http/https only, no embedded credentials.
 
 License: ISC. Homepage: https://github.com/tschk/darash — landing page: https://tschk.github.io/darash/

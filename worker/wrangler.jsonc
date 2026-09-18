@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "darash-site",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-04-01",
+  "assets": {
+    "directory": "../site",
+    "binding": "ASSETS",
+    // Worker runs first so every request (static included) can be logged and
+    // counted; the Worker serves assets back via env.ASSETS.fetch().
+    // Omit not_found_handling: unmatched paths are a plain static 404.
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COUNTER",
+        "class_name": "Counter"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Counter"]
+    }
+  ]
+}
