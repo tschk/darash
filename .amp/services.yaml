@@ -1,0 +1,5 @@
+services:
+  darash-api:
+    command: bash -c 'cargo build --release >/dev/null 2>&1; cd api && bun install && DARASH_BIN=../target/release/darash bun run src/index.ts'
+    portal: true
+    port: 8787

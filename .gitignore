@@ -1,3 +1,4 @@
 /target
 
 .amp/portals/*
+node_modules/

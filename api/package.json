@@ -1,0 +1,13 @@
+{
+  "name": "darash-api",
+  "version": "0.1.0",
+  "description": "Hosted darash research instance: HTTP search and fetch/extract over Hono",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts"
+  },
+  "dependencies": {
+    "hono": "^4"
+  }
+}
