@@ -1,0 +1,19 @@
+# Darash
+
+> The all-in-one research crate: async web search, page fetch, and HTML extraction in one Rust dependency. No API keys.
+
+Darash (crates.io: `darash`, repo: https://github.com/tschk/darash) implements the research loop for agents:
+
+- **Search**: `SearchClient::local()` runs an in-process multi-source backend by default; `SearchClient::new(endpoint)` targets any SearxNG-compatible endpoint. `SearchRequest` carries a Vane-compatible mode (speed/balanced/quality) and sources (web/academic/discussions); responses project into citations without an AI provider.
+- **Fetch**: `darash::fetch::fetch(url, headers)` returns a `FetchReport` with status, final URL, redirected flag, elapsed ms, content type, size, and body. Never silent, even on error statuses; bodies capped at 2 MiB. `fetch::read_source(path)` does the same for local files.
+- **Extract**: `to_markdown`, `to_text`, `outline` (repeating structures), `select_texts`, `rows(html, container, "title=h2, url=a@href")`, `tables` — all local and deterministic. `estimate_tokens` (≈4 chars/token) and `apply_budget` cut output at item boundaries within a token budget, always keeping at least one item.
+
+CLI (ships with the crate, `cargo install darash`):
+
+- `darash search <query> [--mode speed|balanced|quality] [--source web|academic|discussions] [--url endpoint] [--json]`
+- `darash fetch <url|file> [--md] [--text] [--outline] [--select CSS] [--row name=sel,url=a@href] [--table] [--body] [--limit N] [--budget N] [--header 'Name: value'] [--json]`
+- Fetch prints the full report as JSON by default; extraction modes print data on stdout and a one-line report plus omission notes on stderr. `--json` wraps any mode as `{"data": …, "meta": {status, ok, url, ms, bytes, count, omitted}}`.
+
+Limits: 15 s search timeout (configurable via `SearchConfig::with_timeout`), 256 KiB search response cap, 2 MiB fetch body cap, queries ≤ 512 chars, http/https only, no embedded credentials.
+
+License: ISC. Homepage: https://github.com/tschk/darash — landing page: https://tschk.github.io/darash/

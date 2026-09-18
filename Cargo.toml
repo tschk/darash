@@ -1,11 +1,11 @@
 [package]
 name = "darash"
-version = "0.5.2"
+version = "0.6.0"
 edition = "2021"
 license = "ISC"
-description = "Provider-neutral async client with an in-process search engine and SearxNG support"
+description = "All-in-one research crate: async search, page fetch, and HTML extraction with no API keys"
 repository = "https://github.com/tschk/darash"
-keywords = ["search", "searxng", "http", "async"]
+keywords = ["search", "searxng", "http", "async", "cli"]
 categories = ["api-bindings", "web-programming::http-client"]
 
 [dependencies]

@@ -10,6 +10,8 @@ mod cache;
 mod embedded_search;
 mod websurfx;
 
+pub mod fetch;
+
 pub use websurfx::{
     build_search_url as build_websurfx_search_url, WebsurfxEngineError, WebsurfxError,
     WebsurfxMappedResponse, WebsurfxMetadata, WebsurfxQuery, WebsurfxResponse, WebsurfxResult,
@@ -890,6 +892,14 @@ pub enum Error {
     Decode(#[source] serde_json::Error),
     #[error("embedded search failed: {0}")]
     Local(String),
+    #[error("fetch request failed: {0}")]
+    Fetch(#[source] reqwest::Error),
+    #[error("fetch body exceeded the {}-byte limit", fetch::FETCH_MAX_BODY_BYTES)]
+    FetchBodyTooLarge,
+    #[error("invalid selector: {0}")]
+    InvalidSelector(String),
+    #[error("source read failed: {0}")]
+    SourceRead(String),
 }
 
 #[cfg(test)]

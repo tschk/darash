@@ -1,9 +1,11 @@
 # Darash
 
-Darash is a provider-neutral async Rust search client with a small in-process
-multi-source backend by default. It can also query a remote
-[SearxNG](https://docs.searxng.org/) endpoint, bounds response sizes, and
-projects results into citations without requiring an API key.
+Darash is an all-in-one research crate: provider-neutral async web search, page
+fetching, and HTML extraction in one dependency, with no API keys. Search runs
+on a small in-process multi-source backend by default and can also query a
+remote [SearxNG](https://docs.searxng.org/) endpoint; fetch and extraction turn
+any page into markdown, outlines, selector matches, rows, and tables — local,
+deterministic, and shaped for a context window.
 
 ## External SearxNG
 
@@ -30,7 +32,7 @@ Add Darash from crates.io:
 
 ```toml
 [dependencies]
-darash = "0.5.2"
+darash = "0.6.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -130,18 +132,70 @@ do not embed Websurfx or add its AGPL dependency tree. Use
 server; it maps Websurfx's engine and error metadata into Darash's response
 model.
 
-## CLI
+## Fetch and extract
 
-The native CLI starts the in-process Darash backend by default. Pass `--url`
-only when using another SearxNG-compatible endpoint:
+Search finds sources; `darash::fetch` reads them. Every fetch returns a
+[`FetchReport`](https://docs.rs/darash) with the status, final URL, redirect
+flag, elapsed time, content type, size, and body — never silent, even for
+error statuses. Bodies are capped at 2 MiB.
 
-```sh
-cargo run -- search "rust async"
-cargo run -- search "rust async" --mode quality --source academic --url http://localhost:9090
+```rust,no_run
+use darash::fetch;
+
+#[tokio::main]
+async fn main() -> Result<(), darash::Error> {
+    let report = fetch::fetch("https://example.com", &[]).await?;
+    println!("{}", report.summary());
+
+    // Agent-shaped output, all local and deterministic:
+    let markdown = fetch::to_markdown(&report.body);   // page as markdown
+    let outline = fetch::outline(&report.body);        // repeating structures
+    let titles = fetch::select_texts(&report.body, "h2")?; // selector matches
+    let rows = fetch::rows(&report.body, ".item", "title=h2, url=a@href")?;
+    let tables = fetch::tables(&report.body);          // keyed table rows
+    let tokens = fetch::estimate_tokens(&markdown);    // ~4 chars per token
+    Ok(())
+}
 ```
 
-The CLI prints any backend answer and the cited sources. AI synthesis remains a
-host responsibility; no MCP server is needed for this in-process tool.
+`apply_budget` cuts a list of items at item boundaries to fit an estimated
+token budget, always keeping at least one item. Local files work through the
+same pipeline with `fetch::read_source`.
+
+## CLI
+
+The `darash` binary ships with the crate (`cargo install darash`). Search
+starts the in-process backend by default; pass `--url` only when using another
+SearxNG-compatible endpoint:
+
+```sh
+darash search "rust async"
+darash search "rust async" --mode quality --source academic --url http://localhost:9090
+darash search "rust async" --json
+```
+
+`fetch` is the research half of the CLI. Without extraction flags it prints the
+full report as JSON; with a mode it prints extracted data on stdout and a
+one-line report on stderr:
+
+```sh
+darash fetch https://example.com                          # full report, JSON
+darash fetch https://example.com --md                     # page as markdown
+darash fetch https://example.com --md --budget 800        # markdown within ~800 tokens
+darash fetch https://example.com --outline                # repeating structures
+darash fetch https://example.com --select "h2" --limit 10 # selector matches
+darash fetch https://example.com --select ".item" --row "title=h2, url=a@href"
+darash fetch https://example.com --table --json           # keyed rows as JSON
+darash fetch page.html --md                               # local files work too
+```
+
+Extraction output is capped at 50 items by default (`--limit`) and can be
+further bounded with `--budget` (estimated tokens, cut at item boundaries);
+omissions are announced on stderr, never silent. `--json` wraps any mode as
+`{"data": …, "meta": {status, ok, url, ms, bytes, count, omitted}}`.
+
+AI synthesis remains a host responsibility; no MCP server is needed for this
+in-process tool.
 
 Use `SearchConfig` when the endpoint needs a custom timeout:
 

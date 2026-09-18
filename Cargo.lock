@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "darash"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "criterion",
  "futures-util",

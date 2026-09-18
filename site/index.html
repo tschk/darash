@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Darash — the all-in-one research crate</title>
+<meta name="description" content="Async web search, page fetch, and HTML extraction in one Rust crate. No API keys, no cloud.">
+<style>
+  :root {
+    --bg: #0b0e14;
+    --bg-soft: #11151f;
+    --panel: #151a26;
+    --border: #232a3a;
+    --text: #d7dce6;
+    --muted: #8a93a6;
+    --accent: #5eead4;
+    --accent-2: #818cf8;
+    --code-bg: #0d1118;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.65 ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre {
+    font: 13.5px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    background: rgba(11,14,20,.85);
+    position: sticky; top: 0; backdrop-filter: blur(8px);
+  }
+  header .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { font-weight: 700; letter-spacing: .5px; font-size: 18px; color: var(--text); }
+  .brand span { color: var(--accent); }
+  nav { display: flex; gap: 22px; }
+  nav a { color: var(--muted); font-size: 14.5px; }
+  nav a:hover { color: var(--text); text-decoration: none; }
+
+  .hero { padding: 88px 0 64px; }
+  .hero h1 {
+    font-size: clamp(34px, 6vw, 54px);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    max-width: 760px;
+  }
+  .hero h1 em { font-style: normal; color: var(--accent); }
+  .hero p.lead { color: var(--muted); font-size: 19px; max-width: 640px; margin: 20px 0 32px; }
+  .badges { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 28px; }
+  .badge {
+    font-size: 13px; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 12px; background: var(--bg-soft);
+  }
+  .install {
+    display: inline-block; background: var(--code-bg);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 18px; color: var(--accent);
+  }
+  .install .c { color: var(--muted); user-select: none; }
+
+  h2 { font-size: 26px; letter-spacing: -0.01em; margin-bottom: 8px; }
+  .section { padding: 56px 0; border-top: 1px solid var(--border); }
+  .section > p { color: var(--muted); max-width: 680px; margin-bottom: 28px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 22px;
+  }
+  .card h3 { font-size: 16px; margin-bottom: 10px; color: var(--accent-2); }
+  .card pre {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 14px; overflow-x: auto;
+    color: var(--text);
+    font-size: 10.5px; line-height: 1.55;
+  }
+  .card p { color: var(--muted); font-size: 14px; margin-top: 10px; }
+
+  pre.block {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 20px; overflow-x: auto;
+  }
+  pre.block .k { color: var(--accent-2); }
+  pre.block .s { color: var(--accent); }
+  pre.block .c { color: var(--muted); }
+
+  footer { border-top: 1px solid var(--border); padding: 32px 0 48px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="brand">darash<span>_</span></div>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#cli">CLI</a>
+      <a href="https://github.com/tschk/darash">GitHub</a>
+      <a href="https://crates.io/crates/darash">crates.io</a>
+      <a href="https://docs.rs/darash">docs.rs</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <div class="badges">
+      <span class="badge">ISC licensed</span>
+      <span class="badge">zero API keys</span>
+      <span class="badge">async · Rust</span>
+      <span class="badge">v0.6.0</span>
+    </div>
+    <h1>Search, fetch, extract.<br>The <em>all-in-one research crate</em>.</h1>
+    <p class="lead">
+      Darash does the whole research loop in one dependency: web search on an
+      in-process multi-source backend, always-reporting page fetches, and
+      deterministic HTML extraction shaped for a context window.
+    </p>
+    <code class="install"><span class="c">$</span> cargo add darash</code>
+  </section>
+
+  <section class="section" id="features">
+    <div class="wrap">
+      <h2>One crate, the whole loop</h2>
+      <p>No keys, no cloud, no per-call pricing. Everything runs in your process, capped and deterministic.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>Search</h3>
+          <pre>let client = SearchClient::local()?;
+let res = client
+  .search_request(&req)
+  .await?;</pre>
+          <p>Provider-neutral, in-process multi-source backend by default, or point it at any SearxNG endpoint.</p>
+        </div>
+        <div class="card">
+          <h3>Fetch</h3>
+          <pre>let report = fetch
+  .fetch(url, &[])
+  .await?;
+report.summary()</pre>
+          <p>Never silent: status, final URL, redirects, timing, size, and body — even on error statuses. Bodies capped at 2 MiB.</p>
+        </div>
+        <div class="card">
+          <h3>Extract</h3>
+          <pre>let md = fetch
+  .to_markdown(&body);
+let rows = fetch
+  .rows(&body, ".item",
+    "title=h2")?;</pre>
+          <p>Markdown, outlines, selector matches, multi-field rows, and tables — all local and deterministic.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="cli">
+    <div class="wrap">
+      <h2>The CLI ships with it</h2>
+      <p><code>cargo install darash</code> gives you a research binary, not just a library. Extraction prints data on stdout and a report on stderr; omissions are announced, never silent.</p>
+      <pre class="block"><span class="c"># search the in-process backend, get cited sources</span>
+<span class="k">darash</span> search <span class="s">"rust async"</span> --json
+
+<span class="c"># read a page as markdown within a token budget</span>
+<span class="k">darash</span> fetch https://example.com <span class="s">--md --budget 800</span>
+
+<span class="c"># discover structure, then extract rows</span>
+<span class="k">darash</span> fetch https://example.com <span class="s">--outline</span>
+<span class="k">darash</span> fetch https://example.com <span class="s">--select</span> .item <span class="s">--row</span> <span class="s">"title=h2, url=a@href"</span></pre>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>darash — ISC licensed. Built for agents and the humans who read over their shoulders.</div>
+    <div><a href="https://github.com/tschk/darash">source</a> · <a href="https://crates.io/crates/darash">crates.io</a> · <a href="https://docs.rs/darash">docs.rs</a></div>
+  </div>
+</footer>
+
+</body>
+</html>
