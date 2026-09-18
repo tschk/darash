@@ -10,7 +10,9 @@ mod cache;
 mod embedded_search;
 mod websurfx;
 
+pub mod disk_cache;
 pub mod fetch;
+pub mod filter;
 
 pub use websurfx::{
     build_search_url as build_websurfx_search_url, WebsurfxEngineError, WebsurfxError,
@@ -894,8 +896,10 @@ pub enum Error {
     Local(String),
     #[error("fetch request failed: {0}")]
     Fetch(#[source] reqwest::Error),
-    #[error("fetch body exceeded the {}-byte limit", fetch::FETCH_MAX_BODY_BYTES)]
-    FetchBodyTooLarge,
+    #[error("unsupported HTTP method: {0}")]
+    InvalidMethod(String),
+    #[error("fetch body exceeded the {limit}-byte limit")]
+    FetchBodyTooLarge { limit: usize },
     #[error("invalid selector: {0}")]
     InvalidSelector(String),
     #[error("source read failed: {0}")]
