@@ -123,6 +123,9 @@ app.get("/fetch", (c) => {
     return c.json({ error: "fetch failed", detail: stderr }, code === 22 ? 422 : 502);
   }
   const parsed = JSON.parse(stdout);
+  if (typeof parsed === "number") {
+    return c.json({ data: parsed, meta: { ms } });
+  }
   return c.json({ ...parsed, meta: { ...(parsed.meta ?? {}), ms } });
 });
 
