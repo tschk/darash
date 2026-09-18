@@ -1,6 +1,6 @@
 [package]
 name = "darash"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 license = "ISC"
 description = "All-in-one research crate: async search, page fetch, and HTML extraction with no API keys"
@@ -19,6 +19,8 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 scraper = "0.26"
 url = "2"
 log = "0.4.33"
+regex = "1"
+sha2 = "0.10"
 
 [dev-dependencies]
 criterion = "0.5"

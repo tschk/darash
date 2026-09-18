@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::Error;
@@ -23,7 +23,7 @@ const MAX_SAMPLE_CHARS: usize = 80;
 
 /// A completed fetch or local-file read. Never silent: every field is
 /// populated even for error statuses, and the body is included.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FetchReport {
     /// HTTP status, or `None` when the source was a local file.
     pub status: Option<u16>,
@@ -67,13 +67,53 @@ impl FetchReport {
     }
 }
 
-/// Fetch a page over HTTP or HTTPS and report everything.
+/// Options for an HTTP fetch. `Default` is a plain `GET` with no body.
 ///
-/// Non-2xx statuses are still a valid [`FetchReport`] with `ok == false`;
-/// only transport failures and the body cap return [`Error`].
+/// This mirrors the useful subset of curl's request flags while staying a
+/// small, explicit struct. The library never caches; caching is a CLI concern
+/// handled by [`crate::disk_cache`].
+#[derive(Clone, Debug, Default)]
+pub struct FetchOptions {
+    /// HTTP method; `None` means `GET`.
+    pub method: Option<String>,
+    pub headers: Vec<(String, String)>,
+    /// Request body bytes; `None` means no body.
+    pub body: Option<Vec<u8>>,
+    /// HTTP basic auth `(user, password)`.
+    pub basic_auth: Option<(String, String)>,
+    /// Accept invalid TLS certificates (curl's `-k`).
+    pub insecure: bool,
+    /// Request timeout; `None` uses the 30-second default.
+    pub timeout: Option<Duration>,
+    /// Body cap; `None` uses [`FETCH_MAX_BODY_BYTES`].
+    pub max_bytes: Option<usize>,
+}
+
+/// Fetch a page over HTTP or HTTPS with default options and report everything.
+///
+/// This is the compatibility wrapper around [`fetch_with`]; new callers that
+/// need a method, body, auth, timeout, or body cap should use `fetch_with`.
 pub async fn fetch(
     url: impl AsRef<str>,
     headers: &[(String, String)],
+) -> Result<FetchReport, Error> {
+    fetch_with(
+        url,
+        &FetchOptions {
+            headers: headers.to_vec(),
+            ..FetchOptions::default()
+        },
+    )
+    .await
+}
+
+/// Fetch a page over HTTP or HTTPS with explicit options and report everything.
+///
+/// Non-2xx statuses are still a valid [`FetchReport`] with `ok == false`;
+/// only transport failures and the body cap return [`Error`].
+pub async fn fetch_with(
+    url: impl AsRef<str>,
+    options: &FetchOptions,
 ) -> Result<FetchReport, Error> {
     let parsed = Url::parse(url.as_ref()).map_err(|error| {
         Error::InvalidEndpoint(format!("{} is not a valid URL: {error}", url.as_ref()))
@@ -86,8 +126,15 @@ pub async fn fetch(
     }
     let original = parsed.clone();
 
+    let method = match options.method.as_deref() {
+        Some(method) => reqwest::Method::from_bytes(method.as_bytes())
+            .map_err(|_| Error::InvalidMethod(method.to_owned()))?,
+        None => reqwest::Method::GET,
+    };
+    let max_bytes = options.max_bytes.unwrap_or(FETCH_MAX_BODY_BYTES);
+
     let mut headers_map = reqwest::header::HeaderMap::new();
-    for (name, value) in headers {
+    for (name, value) in &options.headers {
         let name = reqwest::header::HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
             Error::InvalidEndpoint(format!("invalid header name {name:?}: {error}"))
         })?;
@@ -98,17 +145,20 @@ pub async fn fetch(
     }
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
-        .timeout(FETCH_TIMEOUT)
+        .timeout(options.timeout.unwrap_or(FETCH_TIMEOUT))
+        .danger_accept_invalid_certs(options.insecure)
         .build()
         .map_err(Error::ClientBuild)?;
 
     let started = Instant::now();
-    let mut response = client
-        .get(parsed)
-        .headers(headers_map)
-        .send()
-        .await
-        .map_err(Error::Fetch)?;
+    let mut request = client.request(method, parsed).headers(headers_map);
+    if let Some((user, password)) = &options.basic_auth {
+        request = request.basic_auth(user, Some(password));
+    }
+    if let Some(body) = &options.body {
+        request = request.body(body.clone());
+    }
+    let mut response = request.send().await.map_err(Error::Fetch)?;
 
     let status = response.status();
     let final_url = response.url().to_string();
@@ -121,8 +171,8 @@ pub async fn fetch(
 
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(Error::Fetch)? {
-        if bytes.len() + chunk.len() > FETCH_MAX_BODY_BYTES {
-            return Err(Error::FetchBodyTooLarge);
+        if bytes.len() + chunk.len() > max_bytes {
+            return Err(Error::FetchBodyTooLarge { limit: max_bytes });
         }
         bytes.extend_from_slice(&chunk);
     }
@@ -774,10 +824,205 @@ pub fn read_source(path: impl AsRef<std::path::Path>) -> Result<FetchReport, Err
     file.read_to_end(&mut bytes)
         .map_err(|error| Error::SourceRead(format!("cannot read {}: {error}", path.display())))?;
     if bytes.len() > FETCH_MAX_BODY_BYTES {
-        return Err(Error::FetchBodyTooLarge);
+        return Err(Error::FetchBodyTooLarge {
+            limit: FETCH_MAX_BODY_BYTES,
+        });
     }
     let body = String::from_utf8_lossy(&bytes).into_owned();
     Ok(FetchReport::from_source(path.display().to_string(), body))
+}
+
+/// One match found by [`locate`].
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct LocateHit {
+    /// CSS selector path from below `<body>`/`<html>` down to the holder.
+    pub selector: String,
+    /// Short snippet of the matching attribute or text.
+    pub snippet: String,
+    /// `"attr"` when an attribute matched, `"text"` when element text matched.
+    pub kind: String,
+    /// Attribute name when `kind == "attr"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attribute: Option<String>,
+}
+
+/// Find the deepest elements whose text or attributes contain `needle`.
+///
+/// Matching is case-insensitive. An ancestor that only contains the needle
+/// through a descendant's text is skipped, so each hit is the element that
+/// actually holds the text. Attribute hits are reported for the element that
+/// owns the attribute. Selector paths use `tag#id` when an id exists, else
+/// `tag.class1.class2`, with CSS identifiers escaped so names like
+/// `sm:w-1/2` round-trip.
+pub fn locate(html: &str, needle: &str) -> Vec<LocateHit> {
+    let document = scraper::Html::parse_document(html);
+    let needle = needle.to_lowercase();
+    let mut hits = Vec::new();
+    let mut path = Vec::new();
+    visit_locate(document.root_element(), &mut path, &needle, &mut hits);
+    hits
+}
+
+struct PathPart {
+    tag: String,
+    id: Option<String>,
+    classes: Vec<String>,
+}
+
+fn visit_locate(
+    element: scraper::ElementRef,
+    path: &mut Vec<PathPart>,
+    needle: &str,
+    hits: &mut Vec<LocateHit>,
+) {
+    let value = element.value();
+    let tag = value.name().to_owned();
+    let id = value.id().map(str::to_owned);
+    let classes = value.classes().map(str::to_owned).collect::<Vec<_>>();
+
+    let mut attr_hit = None;
+    for (name, attr_value) in value.attrs() {
+        if attr_value.to_lowercase().contains(needle) {
+            attr_hit = Some((name.to_owned(), attr_value.to_owned()));
+            break;
+        }
+    }
+    let child_hit = element.child_elements().any(|child| {
+        child
+            .text()
+            .collect::<String>()
+            .to_lowercase()
+            .contains(needle)
+    });
+    let text = element.text().collect::<String>();
+    let text_hit = !child_hit && text.to_lowercase().contains(needle);
+
+    path.push(PathPart { tag, id, classes });
+    if let Some((name, attr_value)) = attr_hit {
+        hits.push(LocateHit {
+            selector: selector_path(path),
+            snippet: snippet_cap(&format!("{name}=\"{attr_value}\"")),
+            kind: "attr".to_owned(),
+            attribute: Some(name),
+        });
+    } else if text_hit {
+        hits.push(LocateHit {
+            selector: selector_path(path),
+            snippet: snippet_cap(&collapse_ws(text.trim())),
+            kind: "text".to_owned(),
+            attribute: None,
+        });
+    }
+
+    for child in element.child_elements() {
+        visit_locate(child, path, needle, hits);
+    }
+    path.pop();
+}
+
+fn selector_path(path: &[PathPart]) -> String {
+    path.iter()
+        .filter(|part| part.tag != "body" && part.tag != "html")
+        .map(selector_part)
+        .collect::<Vec<_>>()
+        .join(" > ")
+}
+
+fn selector_part(part: &PathPart) -> String {
+    if let Some(id) = &part.id {
+        return format!("{}#{}", part.tag, escape_css_ident(id));
+    }
+    if part.classes.is_empty() {
+        return part.tag.clone();
+    }
+    let classes = part
+        .classes
+        .iter()
+        .map(|class| format!(".{}", escape_css_ident(class)))
+        .collect::<String>();
+    format!("{}{}", part.tag, classes)
+}
+
+/// Escape a CSS identifier so names like `sm:w-1/2` round-trip through a
+/// selector. Non-ASCII characters are kept; ASCII punctuation is backslash
+/// escaped, and a leading digit uses a hex escape.
+pub fn escape_css_ident(ident: &str) -> String {
+    let mut out = String::new();
+    for (index, ch) in ident.chars().enumerate() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            if index == 0 && ch.is_ascii_digit() {
+                out.push_str(&format!("\\{:x} ", ch as u32));
+            } else {
+                out.push(ch);
+            }
+        } else if ch.is_ascii() {
+            out.push('\\');
+            out.push(ch);
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn snippet_cap(text: &str) -> String {
+    text.chars().take(MAX_SAMPLE_CHARS).collect()
+}
+
+/// Pagination state for structured extraction output.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PageState {
+    /// More results follow at `next_offset`.
+    More,
+    /// The returned page reaches the end of the result set.
+    Complete,
+    /// `offset` is beyond the end; no results were returned.
+    PastEnd,
+}
+
+/// Metadata describing a paginated slice of structured results.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct PageMeta {
+    pub state: PageState,
+    pub total: usize,
+    pub offset: usize,
+    pub returned: usize,
+    pub next_offset: Option<usize>,
+}
+
+/// Compute the pagination slice for `total` results at `offset` with `limit`.
+///
+/// `offset` past a non-empty result set is `PastEnd`; an empty result set is
+/// `Complete`. `next_offset` is `Some` only when more results follow.
+pub fn paginate(total: usize, offset: usize, limit: usize) -> PageMeta {
+    if offset >= total && offset > 0 {
+        return PageMeta {
+            state: PageState::PastEnd,
+            total,
+            offset,
+            returned: 0,
+            next_offset: None,
+        };
+    }
+    let limit = limit.max(1);
+    let returned = total.saturating_sub(offset).min(limit);
+    let next_offset = if offset + returned < total {
+        Some(offset + returned)
+    } else {
+        None
+    };
+    PageMeta {
+        state: if next_offset.is_none() {
+            PageState::Complete
+        } else {
+            PageState::More
+        },
+        total,
+        offset,
+        returned,
+        next_offset,
+    }
 }
 
 #[cfg(test)]
@@ -946,5 +1191,83 @@ mod tests {
             .await
             .expect_err("ftp is rejected before the network");
         assert!(error.to_string().contains("only http and https"));
+    }
+
+    #[test]
+    fn locate_reports_deepest_holders_and_escapes_selectors() {
+        let html = r#"
+            <html><body>
+                <div class="card sm:w-1/2" id="first">
+                    <h2>Example Domain</h2>
+                    <a href="https://example.com/more" data-note="Example link">More</a>
+                </div>
+                <div class="card">
+                    <p>Nothing to see</p>
+                </div>
+            </body></html>
+        "#;
+        let hits = locate(html, "Example Domain");
+        assert_eq!(
+            hits.len(),
+            1,
+            "only the h2 holds the text, not its ancestors"
+        );
+        assert_eq!(hits[0].selector, "div#first > h2");
+        assert_eq!(hits[0].kind, "text");
+        assert_eq!(hits[0].snippet, "Example Domain");
+
+        let attr_hits = locate(html, "Example link");
+        assert_eq!(attr_hits.len(), 1);
+        assert_eq!(attr_hits[0].kind, "attr");
+        assert_eq!(attr_hits[0].attribute.as_deref(), Some("data-note"));
+        assert!(attr_hits[0].snippet.contains("data-note=\"Example link\""));
+
+        // Class escaping round-trips CSS identifiers like `sm:w-1/2`.
+        let class_hits = locate(html, "Nothing");
+        assert_eq!(class_hits[0].selector, "div.card > p");
+    }
+
+    #[test]
+    fn escape_css_ident_escapes_punctuation_and_leading_digits() {
+        assert_eq!(escape_css_ident("sm:w-1/2"), "sm\\:w-1\\/2");
+        assert_eq!(escape_css_ident("plain_name-1"), "plain_name-1");
+        assert_eq!(escape_css_ident("2col"), "\\32 col");
+    }
+
+    #[test]
+    fn locate_prefers_attribute_hits_for_the_owning_element() {
+        let hits = locate("<p><a href=\"/needle\">x</a></p>", "needle");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].selector, "p > a");
+        assert_eq!(hits[0].kind, "attr");
+    }
+
+    #[test]
+    fn paginate_state_machine_covers_more_complete_and_past_end() {
+        let more = paginate(100, 0, 50);
+        assert_eq!(more.state, PageState::More);
+        assert_eq!(more.returned, 50);
+        assert_eq!(more.next_offset, Some(50));
+
+        let complete = paginate(100, 50, 50);
+        assert_eq!(complete.state, PageState::Complete);
+        assert_eq!(complete.returned, 50);
+        assert_eq!(complete.next_offset, None);
+
+        let past = paginate(100, 100, 50);
+        assert_eq!(past.state, PageState::PastEnd);
+        assert_eq!(past.returned, 0);
+        assert_eq!(past.next_offset, None);
+
+        let empty = paginate(0, 0, 50);
+        assert_eq!(empty.state, PageState::Complete);
+        assert_eq!(empty.returned, 0);
+
+        let short = paginate(3, 0, 50);
+        assert_eq!(short.state, PageState::Complete);
+        assert_eq!(short.returned, 3);
+
+        let past_empty = paginate(0, 5, 50);
+        assert_eq!(past_empty.state, PageState::PastEnd);
     }
 }

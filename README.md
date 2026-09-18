@@ -32,7 +32,7 @@ Add Darash from crates.io:
 
 ```toml
 [dependencies]
-darash = "0.6.0"
+darash = "0.7.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -159,8 +159,15 @@ async fn main() -> Result<(), darash::Error> {
 ```
 
 `apply_budget` cuts a list of items at item boundaries to fit an estimated
-token budget, always keeping at least one item. Local files work through the
-same pipeline with `fetch::read_source`.
+token budget, always keeping at least one item. `fetch::fetch(url, headers)` is
+a thin wrapper over `fetch::fetch_with(url, FetchOptions { .. })`, which carries
+a method, request body, basic auth, insecure-TLS opt-in, timeout, and body cap.
+`fetch::read_source(path)` reads a local file through the same pipeline.
+`fetch::locate(html, text)` finds the deepest elements that hold a piece of text
+and returns a CSS selector path plus a short snippet. `fetch::paginate(total,
+offset, limit)` computes the `PageMeta` state (`more`, `complete`, `past_end`)
+the CLI uses. The `filter` module compiles the safe `--where` expression
+language, and `disk_cache` holds the CLI's short-lived on-disk body cache.
 
 ## CLI
 
@@ -175,19 +182,50 @@ darash search "rust async" --json
 ```
 
 `fetch` is the research half of the CLI. Without extraction flags it prints the
-full report as JSON; with a mode it prints extracted data on stdout and a
-one-line report on stderr:
+full report as JSON (including the body); `--body` prints only the body. With a
+mode it prints extracted data on stdout and a one-line report on stderr:
 
 ```sh
 darash fetch https://example.com                          # full report, JSON
+darash fetch https://example.com --body                   # response body only
 darash fetch https://example.com --md                     # page as markdown
 darash fetch https://example.com --md --budget 800        # markdown within ~800 tokens
 darash fetch https://example.com --outline                # repeating structures
 darash fetch https://example.com --select "h2" --limit 10 # selector matches
+darash fetch https://example.com --select "h2" --count    # just the match count
 darash fetch https://example.com --select ".item" --row "title=h2, url=a@href"
 darash fetch https://example.com --table --json           # keyed rows as JSON
+darash fetch https://example.com --locate "Example Domain" # which selector holds it
 darash fetch page.html --md                               # local files work too
 ```
+
+Rows and single tables print as TSV by default (a header line once, then values;
+tabs and newlines inside a value fold to spaces, and objects become JSON);
+`--json` switches them to JSON rows, and multiple tables always print as JSON.
+`--locate TEXT` reports each deepest element whose text or an attribute contains
+`TEXT`, as a CSS selector path and an 80-character snippet.
+
+Structured output (`--select`, `--row`, `--table`, `--locate`) is paginated:
+`--limit` (default 50) caps a page and `--offset` starts it. In plain output the
+CLI announces `N more result(s) hidden — continue with --offset …` or that the
+offset is past the end; `--json-envelope` instead prints
+`{"data": …, "meta": {state, total, offset, returned, next_offset}}`, where
+`state` is `more`, `complete`, or `past_end`. `--where EXPR` filters rows and
+tables with a safe expression language (no `eval`): comparisons (`== != ~ !~ >
+>= < <=`), `&&`/`||`/`!`, numeric-string coercion, `/regex/[flags]`, backtick
+literal column names, and dotted paths that prefer a literally named column.
+When a filter matches nothing the CLI says so on stderr.
+
+`fetch` also accepts the usual curl reflexes: `-X/--method`, `-d/--data`
+(`@file`/`@-` strip CR/LF; `--data-raw` never reads `@` as a file;
+`--data-binary` keeps bytes), `-u user:pass`, `-I/--head`, `-o FILE` (atomic
+write), `-k/--insecure`, `-m/--max-time`, `--max-bytes`, and `-f/--fail` (HTTP
+error exits 22 after printing the report). `-L`, `-i`, `-s`, and `-S` are
+accepted no-ops. Fetched URL bodies are cached for about two minutes under the
+user's cache directory and reused by parse modes; `--fresh` refetches and
+re-caches, `--no-cache` never reads or writes, and credential-bearing URLs,
+custom headers, non-`GET` methods, request bodies, and `Cache-Control: no-store`
+bypass the cache. Cache hits announce their age on stderr.
 
 Extraction output is capped at 50 items by default (`--limit`) and can be
 further bounded with `--budget` (estimated tokens, cut at item boundaries);
