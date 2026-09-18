@@ -157,6 +157,23 @@ app.get("/api/search", async (c) => {
   }
 
   if (lists.length === 0) {
+    // Datacenter egress is often 429'd by public SearXNG instances; fall back
+    // to keyless engines that tolerate server-side fetches.
+    for (const fallback of [queryBingRss, queryMarginalia]) {
+      try {
+        const results = await fallback(query);
+        if (results.length > 0) {
+          lists.push(results);
+          used.push(results[0].engine);
+          break;
+        }
+      } catch (error) {
+        failures.push(`${fallback.name}: ${errorMessage(error)}`);
+      }
+    }
+  }
+
+  if (lists.length === 0) {
     return c.json({ error: "all search instances failed", detail: failures }, 502);
   }
 
@@ -214,6 +231,78 @@ function mergeResults(lists: SearchResult[][], limit: number): SearchResult[] {
   }
   return [...merged.values()].sort((a, b) => b.score - a.score).slice(0, limit);
 }
+
+/** Bing RSS fallback (keyless, datacenter-friendly). */
+async function queryBingRss(query: string): Promise<SearchResult[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS * 2);
+  try {
+    const response = await fetch(`https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`, {
+      headers: { "user-agent": USER_AGENT, accept: "application/rss+xml, text/xml" },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const xml = await response.text();
+    const decode = (value: string) =>
+      value
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&")
+        .replace(/&#x27;|&#39;/g, "'")
+        .replace(/&quot;/g, '"')
+        .trim();
+    const results: SearchResult[] = [];
+    const items = /<item>([\s\S]*?)<\/item>/g;
+    let match: RegExpExecArray | null;
+    while ((match = items.exec(xml)) !== null) {
+      const item = match[1];
+      const title = decode(item.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? "");
+      const url = decode(item.match(/<link>([\s\S]*?)<\/link>/)?.[1] ?? "");
+      const content = decode(item.match(/<description>([\s\S]*?)<\/description>/)?.[1] ?? "");
+      if (!title || !/^https?:\/\//.test(url)) {
+        continue;
+      }
+      results.push({ title, url, content, score: 0, engine: "bing" });
+    }
+    return results;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Marginalia public API fallback (keyless, no-bot index). */
+async function queryMarginalia(query: string): Promise<SearchResult[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS * 2);
+  try {
+    const response = await fetch(`https://api.marginalia.nu/public/search/${encodeURIComponent(query)}`, {
+      headers: { "user-agent": USER_AGENT, accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const body = (await response.json()) as { results?: unknown };
+    if (!Array.isArray(body.results)) {
+      throw new Error("no results array");
+    }
+    return body.results
+      .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+      .map((item) => ({
+        title: asString(item.title),
+        url: asString(item.url),
+        content: asString(item.description),
+        score: 0,
+        engine: "marginalia",
+      }))
+      .filter((result) => result.title.length > 0 && result.url.startsWith("http"));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 
 function normalizeUrl(raw: string): string {
   try {

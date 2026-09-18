@@ -368,7 +368,7 @@ $ <span class="k">curl</span> https://darash.tsc.hk/api/stats</pre>
 
   <section id="live">
     <h2><span class="p">$</span> live</h2>
-    <p class="sec-lead">Polling <code>GET https://darash.tsc.hk/api/stats</code> every 3 s.</p>
+    <p class="sec-lead">Polling <code>GET /api/stats</code> every 3 s — on the hosted instance or any self-host mirror.</p>
     <div class="term">
       <div class="term-bar">
         <span class="dot" id="live-dot"></span>
@@ -399,7 +399,10 @@ $ <span class="k">curl</span> https://darash.tsc.hk/api/stats</pre>
 <script>
 (function () {
   "use strict";
-  var API = "https://darash.tsc.hk";
+  // Same-origin first: the hosted worker and any self-host mirror both work.
+  // On file:// (local preview) fall back to the hosted instance.
+  var API = location.protocol.startsWith("http") ? "" : "https://darash.tsc.hk";
+  var STATS = "/api/stats";
   var totalsEl = document.getElementById("totals");
   var eventsEl = document.getElementById("events");
   var liveDot = document.getElementById("live-dot");

@@ -2,6 +2,9 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "darash-site",
   "main": "src/index.ts",
+  "routes": [
+    { "pattern": "darash.tsc.hk", "zone_name": "tsc.hk", "custom_domain": true }
+  ],
   "compatibility_date": "2025-04-01",
   "assets": {
     "directory": "../site",
