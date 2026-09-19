@@ -6,11 +6,14 @@
 //! rows, and tables. Everything is local, deterministic, and key-free.
 
 use std::collections::HashMap;
+
+#[cfg(feature = "client")]
 use std::io::Read;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "client")]
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use url::Url;
 
 use crate::Error;
 
@@ -93,6 +96,7 @@ pub struct FetchOptions {
 ///
 /// This is the compatibility wrapper around [`fetch_with`]; new callers that
 /// need a method, body, auth, timeout, or body cap should use `fetch_with`.
+#[cfg(feature = "client")]
 pub async fn fetch(
     url: impl AsRef<str>,
     headers: &[(String, String)],
@@ -111,11 +115,12 @@ pub async fn fetch(
 ///
 /// Non-2xx statuses are still a valid [`FetchReport`] with `ok == false`;
 /// only transport failures and the body cap return [`Error`].
+#[cfg(feature = "client")]
 pub async fn fetch_with(
     url: impl AsRef<str>,
     options: &FetchOptions,
 ) -> Result<FetchReport, Error> {
-    let parsed = Url::parse(url.as_ref()).map_err(|error| {
+    let parsed = ::url::Url::parse(url.as_ref()).map_err(|error| {
         Error::InvalidEndpoint(format!("{} is not a valid URL: {error}", url.as_ref()))
     })?;
     if !matches!(parsed.scheme(), "http" | "https") {
@@ -816,6 +821,7 @@ pub fn apply_budget(items: Vec<String>, budget: Option<usize>) -> Budgeted {
 }
 
 /// Read a local file as a fetch report. URLs stay on the network path.
+#[cfg(feature = "client")]
 pub fn read_source(path: impl AsRef<std::path::Path>) -> Result<FetchReport, Error> {
     let path = path.as_ref();
     let mut file = std::fs::File::open(path)

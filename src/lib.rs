@@ -1,12 +1,16 @@
 use std::time::Duration;
 
+#[cfg(feature = "client")]
 use futures_util::StreamExt;
+#[cfg(feature = "client")]
 use reqwest::StatusCode;
 use serde::{de::Deserializer, Deserialize, Serialize};
 use thiserror::Error;
 use url::{form_urlencoded, Url};
 
+#[cfg(feature = "client")]
 mod cache;
+#[cfg(feature = "client")]
 mod embedded_search;
 mod websurfx;
 
@@ -368,6 +372,7 @@ impl SearchQuery {
     }
 }
 
+#[cfg(feature = "client")]
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
     endpoint: Url,
@@ -378,6 +383,7 @@ pub struct SearchConfig {
     allowlist: Vec<String>,
 }
 
+#[cfg(feature = "client")]
 impl SearchConfig {
     pub fn new(endpoint: impl AsRef<str>) -> Result<Self, Error> {
         let endpoint = Url::parse(endpoint.as_ref())
@@ -448,6 +454,7 @@ impl SearchConfig {
     }
 }
 
+#[cfg(feature = "client")]
 #[derive(Clone)]
 pub struct SearchClient {
     http: reqwest::Client,
@@ -456,6 +463,7 @@ pub struct SearchClient {
     cache: cache::TtlCache<(bool, SearchMode, String), SearchResponse>,
 }
 
+#[cfg(feature = "client")]
 impl SearchClient {
     pub fn new(endpoint: impl AsRef<str>) -> Result<Self, Error> {
         Self::from_config(SearchConfig::new(endpoint)?)
@@ -644,6 +652,7 @@ pub(crate) fn is_http_url(raw: &str) -> bool {
         .is_some_and(|url| matches!(url.scheme(), "http" | "https"))
 }
 
+#[cfg(feature = "client")]
 fn truncate_error_body(body: String) -> String {
     if body.len() <= MAX_ERROR_BODY_BYTES {
         return body;
@@ -655,6 +664,7 @@ fn truncate_error_body(body: String) -> String {
     body[..end].to_owned()
 }
 
+#[cfg(feature = "client")]
 async fn read_response_body(response: reqwest::Response) -> Result<String, Error> {
     if response
         .content_length()
@@ -880,20 +890,28 @@ pub enum Error {
     InvalidPage,
     #[error("page is too large for the provider offset")]
     PageOverflow,
+    #[cfg(feature = "client")]
     #[error("failed to build HTTP client: {0}")]
     ClientBuild(#[source] reqwest::Error),
+    #[cfg(feature = "client")]
     #[error("search request failed: {0}")]
     Request(#[source] reqwest::Error),
+    #[cfg(feature = "client")]
     #[error("search service returned HTTP {status}: {body}")]
     HttpStatus { status: StatusCode, body: String },
+    #[cfg(feature = "client")]
     #[error("search response exceeded the {MAX_RESPONSE_BYTES}-byte limit")]
     ResponseTooLarge,
+    #[cfg(feature = "client")]
     #[error("search response was not valid UTF-8: {0}")]
     InvalidResponseEncoding(String),
+    #[cfg(feature = "client")]
     #[error("invalid search response: {0}")]
     Decode(#[source] serde_json::Error),
+    #[cfg(feature = "client")]
     #[error("embedded search failed: {0}")]
     Local(String),
+    #[cfg(feature = "client")]
     #[error("fetch request failed: {0}")]
     Fetch(#[source] reqwest::Error),
     #[error("unsupported HTTP method: {0}")]

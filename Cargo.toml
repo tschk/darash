@@ -9,21 +9,33 @@ keywords = ["search", "searxng", "http", "async", "cli"]
 categories = ["api-bindings", "web-programming::http-client"]
 
 [dependencies]
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
-native-tls = "0.2"
-futures-util = "0.3"
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "stream"] }
+native-tls = { version = "0.2", optional = true }
+futures-util = { version = "0.3", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
 scraper = "0.26"
 url = "2"
 log = "0.4.33"
 regex = "1"
 sha2 = "0.10"
 
+[features]
+default = ["client", "search"]
+# HTTP client (reqwest): search + the library `fetch()` fn. Extraction is
+# always available; disable `client` for wasm/no-network builds.
+client = ["dep:reqwest", "dep:native-tls", "dep:futures-util", "dep:tokio"]
+search = ["client"]
+
 [dev-dependencies]
 criterion = "0.5"
+
+[[bin]]
+name = "darash"
+path = "src/bin/darash.rs"
+required-features = ["client"]
 
 [[bench]]
 name = "bench"
