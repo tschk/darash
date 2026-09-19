@@ -58,9 +58,31 @@ required. The worker has no external API keys.
 | GET    | `/api/search` | `q` (required, ≤512 chars), `mode=speed\|balanced\|quality` (default `balanced`), `limit` (default 8, max 50) |
 | GET    | `/api/fetch`  | `url` (required), `md`, `text`, `outline`, `select=<css>`, `limit`, `budget`   |
 | GET    | `/api/stats`  | `{ totals, live }` — polled by the site (cheap; `no-store`)                    |
+| GET    | `/api/account`| requires key; `{ tier, name, usage }` with window reset timestamps             |
 | GET    | `/api/live`   | WebSocket upgrade; streams `{type:"event",event}` plus a `{type:"hello",...}` primer |
+| POST   | `/api/admin/keys` | admin only (`Authorization: Bearer $ADMIN_SECRET`); body `{tier, name?}` → key, returned once |
+| GET    | `/api/admin/keys` | admin only; list keys with usage today                          |
+| POST   | `/api/admin/keys/revoke` | admin only; body `{key}`                                  |
 | GET    | `/llms.txt`   | served from `ASSETS` like any other static file                               |
 | GET    | `/*`          | static site                                                                   |
+
+## Auth & rate limits
+
+Keys come from `Authorization: Bearer dk_…` (or `?key=dk_…`). Keys are stored
+as SHA-256 hashes only; the raw key is shown once at creation. `/api/health`
+and `/api/stats` are unmetered.
+
+| Tier | Hourly | Daily  | How to get it                          |
+| ---- | ------ | ------ | -------------------------------------- |
+| anon | 30     | 100    | no key (per-IP)                        |
+| free | 60     | 1,000  | `POST /api/admin/keys {"tier":"free"}` |
+| pro  | 600    | 25,000 | `POST /api/admin/keys {"tier":"pro"}`  |
+
+Over-limit responses are `429` with a `Retry-After` header. Errors (4xx/5xx)
+do not burn quota. Check usage any time with `GET /api/account`.
+
+Set the admin secret once with `wrangler secret put ADMIN_SECRET`; admin
+routes 401 while it is unset.
 
 ### `GET /api/search`
 

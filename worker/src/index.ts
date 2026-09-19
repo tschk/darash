@@ -19,9 +19,11 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { parseHTML } from "linkedom";
 import type { RequestEvent, Totals } from "./counter";
+import { TIER_LIMITS, type RateDecision, type Tier } from "./accounts";
 
-// The Durable Object class must be exported from the entry module.
+// The Durable Object classes must be exported from the entry module.
 export { Counter } from "./counter";
+export { Accounts } from "./accounts";
 
 // ---------------------------------------------------------------------------
 // Environment & constants
@@ -30,6 +32,8 @@ export { Counter } from "./counter";
 export interface Env {
   ASSETS: Fetcher;
   COUNTER: DurableObjectNamespace;
+  ACCOUNTS: DurableObjectNamespace;
+  ADMIN_SECRET?: string;
 }
 
 /** SearXNG instances tried in order (provider-neutral JSON out). */
@@ -73,6 +77,78 @@ type OutlineEntry = { selector: string; count: number };
 
 const app = new Hono<{ Bindings: Env }>();
 
+// Rate limiting + account resolution for the metered API (everything under
+// /api except health and stats). Registered before logging so a 429 is also
+// logged with its final status. Anonymous callers are limited per-IP, keyed
+// callers per-key; invalid keys are rejected outright.
+app.use("/api/*", async (c, next) => {
+  const pathname = new URL(c.req.url).pathname;
+  if (pathname.startsWith("/api/health") || pathname.startsWith("/api/stats") || pathname.startsWith("/api/admin")) {
+    return next();
+  }
+
+  const rawKey = extractKey(c.req.raw, c.req.url);
+  let tier: Tier | "anon" = "anon";
+  let identity: string;
+
+  if (rawKey) {
+    const lookup = await accountsStub(c.env).fetch("https://accounts/lookup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ key: rawKey }),
+    });
+    if (!lookup.ok) {
+      return c.json({ error: "invalid api key" }, 401);
+    }
+    const { account } = await lookup.json<{ account: { tier: Tier; keyHash: string } | null }>();
+    if (!account) {
+      return c.json({ error: "invalid api key" }, 401);
+    }
+    tier = account.tier;
+    identity = `key:${account.keyHash}`;
+  } else {
+    identity = `anon:${await clientPseudonym(c.req.raw)}`;
+  }
+
+  const checkResponse = await accountsStub(c.env).fetch("https://accounts/check", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identity, tier }),
+  });
+  const decision = await checkResponse.json<RateDecision>();
+
+  if (!decision.allowed) {
+    c.header("retry-after", String(decision.retryAfter));
+    return c.json(
+      {
+        error: "rate limit exceeded",
+        tier,
+        limits: { hour: TIER_LIMITS[tier].hour, day: TIER_LIMITS[tier].day },
+        retryAfter: decision.retryAfter,
+      },
+      429,
+    );
+  }
+
+  await next();
+
+  // Only successful responses burn quota.
+  if (c.res.status < 400) {
+    await accountsStub(c.env).fetch("https://accounts/record", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ identity }),
+    });
+  }
+  c.set("tier", tier);
+});
+
+declare module "hono" {
+  interface ContextVariableMap {
+    tier: Tier | "anon";
+  }
+}
+
 // Log and count every request. Registered first so it wraps all routing and
 // records the final status/duration. The DO call is deferred via waitUntil so
 // it never delays the response.
@@ -94,6 +170,7 @@ app.use("*", async (c, next) => {
       kind: kindFor(url.pathname),
       status,
       ms: Date.now() - started,
+      tier: c.get("tier") ?? "anon",
     };
     executionCtx.waitUntil(
       (async () => {
@@ -461,6 +538,83 @@ async function readCapped(response: Response, cap: number): Promise<Uint8Array> 
 }
 
 // ---------------------------------------------------------------------------
+// Account (requires key)
+// ---------------------------------------------------------------------------
+
+app.get("/api/account", async (c) => {
+  const rawKey = extractKey(c.req.raw, c.req.url);
+  if (!rawKey) {
+    return c.json({ error: "api key required (Authorization: Bearer <key>)" }, 401);
+  }
+  const lookupResponse = await accountsStub(c.env).fetch("https://accounts/lookup", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key: rawKey }),
+  });
+  if (!lookupResponse.ok) {
+    return c.json({ error: "invalid api key" }, 401);
+  }
+  const { account } = await lookupResponse.json<{
+    account: { tier: Tier; keyHash: string; name: string } | null;
+  }>();
+  if (!account) {
+    return c.json({ error: "invalid api key" }, 401);
+  }
+  const snapshotResponse = await accountsStub(c.env).fetch("https://accounts/snapshot", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identity: `key:${account.keyHash}`, tier: account.tier }),
+  });
+  const snapshot = await snapshotResponse.json<{ tier: Tier | "anon"; usage: Record<string, number> }>();
+  return c.json({ ...snapshot, name: account.name }, 200, { "cache-control": "no-store" });
+});
+
+// ---------------------------------------------------------------------------
+// Admin (requires ADMIN_SECRET) — issue, list, revoke keys
+// ---------------------------------------------------------------------------
+
+function adminAuthorized(c: { req: { raw: Request } }, env: Env): boolean {
+  const expected = env.ADMIN_SECRET;
+  if (!expected) return false;
+  const header = c.req.raw.headers.get("authorization") ?? "";
+  return header === `Bearer ${expected}`;
+}
+
+app.post("/api/admin/keys", async (c) => {
+  if (!adminAuthorized(c, c.env)) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const body = await c.req.json<{ tier?: string; name?: string }>().catch(() => ({}) as { tier?: string; name?: string });
+  const response = await accountsStub(c.env).fetch("https://accounts/create", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tier: body.tier, name: body.name ?? "" }),
+  });
+  return c.json(await response.json(), 201);
+});
+
+app.get("/api/admin/keys", async (c) => {
+  if (!adminAuthorized(c, c.env)) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const response = await accountsStub(c.env).fetch("https://accounts/list");
+  return c.json(await response.json());
+});
+
+app.post("/api/admin/keys/revoke", async (c) => {
+  if (!adminAuthorized(c, c.env)) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const body = await c.req.json<{ key?: string }>().catch(() => ({}) as { key?: string });
+  const response = await accountsStub(c.env).fetch("https://accounts/revoke", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ key: body.key }),
+  });
+  return c.json(await response.json());
+});
+
+// ---------------------------------------------------------------------------
 // Stats & live stream (backed by the Counter DO)
 // ---------------------------------------------------------------------------
 
@@ -494,6 +648,21 @@ export default app;
 function counterStub(env: Env): DurableObjectStub {
   return env.COUNTER.get(env.COUNTER.idFromName(COUNTER_NAME));
 }
+
+function accountsStub(env: Env): DurableObjectStub {
+  return env.ACCOUNTS.get(env.ACCOUNTS.idFromName(COUNTER_NAME));
+}
+
+/** Raw key from `Authorization: Bearer <key>` or `?key=`; null otherwise. */
+function extractKey(request: Request, url: string): string | null {
+  const header = request.headers.get("authorization") ?? "";
+  if (header.startsWith("Bearer dk_")) {
+    return header.slice("Bearer ".length).trim();
+  }
+  const query = new URL(url).searchParams.get("key");
+  return query && query.startsWith("dk_") ? query : null;
+}
+
 
 async function clientPseudonym(request: Request): Promise<string> {
   const ip =

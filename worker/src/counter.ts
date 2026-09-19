@@ -27,6 +27,8 @@ export type RequestEvent = {
   ms: number;
   /** First 8 hex chars of a salted hash of the client IP. */
   client: string;
+  /** Rate-limit tier resolved for this request. */
+  tier?: "anon" | "free" | "pro";
 };
 
 /** Cumulative, durable counters. */
@@ -72,6 +74,7 @@ function normalizeEvent(value: unknown): RequestEvent {
     status: typeof record.status === "number" ? record.status : 0,
     ms: typeof record.ms === "number" ? record.ms : 0,
     client: typeof record.client === "string" ? record.client : "unknown",
+    tier: record.tier === "free" || record.tier === "pro" ? record.tier : "anon",
   };
 }
 

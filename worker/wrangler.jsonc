@@ -19,6 +19,10 @@
       {
         "name": "COUNTER",
         "class_name": "Counter"
+      },
+      {
+        "name": "ACCOUNTS",
+        "class_name": "Accounts"
       }
     ]
   },
@@ -26,6 +30,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["Counter"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["Accounts"]
     }
   ]
 }

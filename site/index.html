@@ -345,7 +345,8 @@ $ <span class="k">darash fetch</span> page.html --md --fresh</pre>
       <pre>GET /api/health
 GET /api/search?q=&amp;mode=&amp;limit=
 GET /api/fetch?url=&amp;md=1&amp;select=&amp;limit=
-GET /api/stats</pre>
+GET /api/stats
+GET /api/account   <span class="m"># your usage — requires a key</span></pre>
     </div>
     <div class="code">
       <span class="cap">curl</span>
@@ -364,6 +365,7 @@ $ <span class="k">curl</span> "https://darash.tsc.hk/api/fetch?url=https://examp
 <span class="c"># usage counters</span>
 $ <span class="k">curl</span> https://darash.tsc.hk/api/stats</pre>
     </div>
+    <p class="sec-lead">Free to use without a key up to fair-use limits (30 req/h per IP). A free key doubles that (60/h, 1,000/day) and tracks your usage — ask for one. Keys pass as <code>Authorization: Bearer dk_…</code>; check <code>GET /api/account</code> for remaining quota.</p>
   </section>
 
   <section id="live">
