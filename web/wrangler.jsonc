@@ -1,9 +1,7 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "darash-web",
-  "main": "src/index.ts",
+  "main": "build/index.js",
   "compatibility_date": "2025-04-01",
-  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "../site",
     "binding": "ASSETS"
@@ -14,5 +12,9 @@
   "routes": [
     { "pattern": "darash.tsc.hk", "zone_name": "tsc.hk", "custom_domain": true }
   ],
+  "build": {
+    "command": "cargo install -q worker-build --version 0.8.6 && worker-build --release",
+    "watch_dir": ["src", "../crates/moonshine-cloudflare/src"]
+  },
   "observability": { "enabled": true }
 }

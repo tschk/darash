@@ -1,0 +1,16 @@
+[package]
+name = "darash-web"
+version = "0.1.0"
+edition = "2021"
+license = "ISC"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+worker = "0.8.6"
+serde = { version = "1", features = ["derive"] }
+moonshine-cloudflare = { path = "../crates/moonshine-cloudflare" }
+
+[profile.release]
+opt-level = "s"

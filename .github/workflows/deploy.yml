@@ -14,10 +14,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: oven-sh/setup-bun@v2
-      - name: Install web worker deps
-        run: bun install --frozen-lockfile
-        working-directory: web
       # API worker first (drops the custom domain), then the web edge (claims
       # it). darash-site keeps its name, so Durable Object state survives.
       - uses: cloudflare/wrangler-action@v3
