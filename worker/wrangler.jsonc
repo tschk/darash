@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "darash-site",
+  "main": "build/index.js",
+  "routes": [
+    { "pattern": "darash.tsc.hk", "zone_name": "tsc.hk", "custom_domain": true }
+  ],
+  "compatibility_date": "2025-04-01",
+  "assets": {
+    "directory": "../site"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "COUNTER", "class_name": "Counter" },
+      { "name": "ACCOUNTS", "class_name": "Accounts" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Counter"] },
+    { "tag": "v2", "new_sqlite_classes": ["Accounts"] }
+  ],
+  "build": {
+    "command": "cargo install -q worker-build --version 0.8.6 && worker-build --release",
+    "watch_dir": ["src"]
+  },
+  "vars": {},
+  "observability": { "enabled": true }
+}

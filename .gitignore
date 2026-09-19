@@ -1,3 +1,7 @@
 /target
 
 .amp/portals/*
+worker/target
+worker/build
+worker/.wrangler
+node_modules
