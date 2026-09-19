@@ -4,532 +4,65 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>darash — all-in-one research crate</title>
-<meta name="description" content="darash is the all-in-one research crate: async web search, page fetch, and HTML extraction in one Rust dependency. Key-free and deterministic.">
-<meta name="theme-color" content="#09090b">
-<meta name="color-scheme" content="dark">
+<meta name="description" content="darash is the all-in-one research crate: async web search, page fetch, and HTML extraction in one Rust dependency. Key-free and deterministic — with a hosted search API at darash.tsc.hk.">
+<link rel="canonical" href="https://darash.tsc.hk/">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
-<style>
-  :root {
-    color-scheme: dark;
-    --bg: #09090b;
-    --fg: #f4f4f5;
-    --muted: #a1a1aa;
-    --border: #27272a;
-    --elevated: #18181b;
-    --code: #09090b;
-    --accent: #3b82f6;
-    --danger: #ef4444;
-    --shadow: 0 4px 20px rgba(0, 0, 0, .5);
-    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--fg);
-    font-family: var(--mono);
-    font-size: 14px;
-    line-height: 1.7;
-    -webkit-font-smoothing: antialiased;
-  }
-  ::selection { background: var(--accent); color: #fff; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; text-underline-offset: 3px; }
-  code {
-    font-family: var(--mono);
-    background: var(--code);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 1px 5px;
-    font-size: .9em;
-    color: var(--fg);
-  }
-  .wrap { max-width: 56rem; margin: 0 auto; padding: 0 24px; }
+<style>/* darash — base layer only.
+ * All layout, spacing, and color live as UnoCSS utilities in the markup
+ * (index.crepus + the Svelte islands). This file is the pre-hydration base:
+ * fonts, colors, inline-code chrome, and the header logo reveal state.
+ */
 
-  /* header */
-  header {
-    position: sticky; top: 0; z-index: 10;
-    border-bottom: 1px solid var(--border);
-    background: rgba(9, 9, 11, .85);
-    backdrop-filter: blur(8px);
-  }
-  header .wrap { display: flex; align-items: center; justify-content: space-between; gap: 18px; height: 60px; }
-  .brand { font-weight: 700; letter-spacing: .5px; white-space: nowrap; }
-  .brand .u { color: var(--accent); }
-  .brand .tag { color: var(--muted); font-weight: 400; font-size: 11.5px; margin-left: 10px; letter-spacing: 0; }
-  nav { display: flex; gap: 18px; font-size: 12.5px; flex-wrap: wrap; }
-  nav a { color: var(--muted); }
-  nav a:hover { color: var(--fg); text-decoration: none; }
+:root {
+  color-scheme: dark;
+}
 
-  /* hero */
-  .hero { padding: 76px 0 56px; }
-  .hero h1 { font-size: clamp(40px, 8vw, 62px); line-height: 1.04; margin: 0 0 6px; letter-spacing: -.03em; font-weight: 800; }
-  .hero h1 .u { color: var(--accent); }
-  .hero .lead { font-size: 16px; max-width: 46rem; margin: 16px 0 10px; color: var(--fg); }
-  .hero .tag { color: var(--muted); font-size: 12.5px; margin: 0 0 28px; }
-  .links { display: flex; gap: 10px; flex-wrap: wrap; }
-  .links a {
-    display: inline-block; padding: 7px 14px; font-size: 12.5px;
-    border: 1px solid var(--border); border-radius: 6px;
-    background: var(--elevated); color: var(--fg);
-    transition: border-color .2s ease, transform .2s ease;
-  }
-  .links a:hover { border-color: var(--accent); text-decoration: none; transform: translateY(-1px); }
+* {
+  box-sizing: border-box;
+}
 
-  /* sections */
-  main section { padding: 52px 0; border-top: 1px solid var(--border); }
-  main section:first-child { border-top: 0; }
-  h2 {
-    font-size: 12.5px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: .2em; color: var(--muted); margin: 0 0 8px;
-  }
-  h2 .p { color: var(--accent); margin-right: 8px; }
-  h3 { font-size: 13px; font-weight: 600; margin: 26px 0 10px; color: var(--fg); }
-  h3 .p { color: var(--accent); margin-right: 6px; }
-  .sec-lead { color: var(--muted); max-width: 46rem; margin: 0 0 26px; }
-  p { margin: 0 0 14px; }
-  .note { color: var(--muted); font-size: 12.5px; }
+html {
+  scroll-behavior: smooth;
+}
 
-  /* code cards */
-  .code {
-    background: var(--elevated); border: 1px solid var(--border);
-    border-radius: 8px; box-shadow: var(--shadow);
-    overflow: hidden; margin: 0 0 18px;
-  }
-  .code .cap {
-    display: block; padding: 8px 14px; border-bottom: 1px solid var(--border);
-    background: var(--bg); color: var(--muted);
-    font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em;
-  }
-  .code pre {
-    margin: 0; padding: 16px; overflow-x: auto;
-    font-family: var(--mono); font-size: 12.5px; line-height: 1.7; color: var(--fg);
-  }
-  .code .c { color: var(--muted); }
-  .code .k { color: var(--accent); }
+body {
+  margin: 0;
+  background: #09090b;
+  color: #f4f4f5;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
 
-  /* flag / pair grids */
-  .flags { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--elevated); margin: 0 0 18px; }
-  .flag { display: grid; grid-template-columns: 15.5rem minmax(0, 1fr); gap: 16px; padding: 11px 16px; border-top: 1px solid var(--border); }
-  .flag:first-child { border-top: 0; }
-  .flag .f { color: var(--accent); font-size: 12.5px; word-break: break-word; }
-  .flag .f em { color: var(--muted); font-style: normal; }
-  .flag .d { color: var(--muted); font-size: 12px; line-height: 1.65; }
+a {
+  color: inherit;
+  text-decoration: none;
+}
 
-  /* terminal panel */
-  .term { border: 1px solid var(--border); border-radius: 8px; background: var(--elevated); box-shadow: var(--shadow); overflow: hidden; }
-  .term-bar {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg);
-    font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .14em;
-  }
-  .term-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); transition: background .3s ease; }
-  .term-bar .dot.ok { background: #22c55e; }
-  .term-bar .dots { display: flex; gap: 5px; margin-left: auto; }
-  .term-body { padding: 14px 16px; font-size: 12.5px; min-height: 232px; }
-  #totals { color: var(--fg); margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px dashed var(--border); }
-  #totals .lbl { color: var(--muted); }
-  #totals .sep { color: var(--border); padding: 0 6px; }
-  #events { display: flex; flex-direction: column; gap: 5px; }
-  .ev { display: grid; grid-template-columns: minmax(0, 1fr) 2.5rem 4.75rem 9.5rem; gap: 10px; align-items: baseline; white-space: nowrap; }
-  .ev .req { overflow: hidden; text-overflow: ellipsis; }
-  .ev .req .m { color: var(--accent); }
-  .ev .req .k { color: var(--muted); }
-  .ev .st { text-align: right; }
-  .ev .st.err { color: var(--danger); }
-  .ev .ms { color: var(--muted); text-align: right; }
-  .ev .cl { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
-  .muted { color: var(--muted); }
+code {
+  font-family: inherit;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 12.5px;
+}
 
-  /* footer */
-  footer { border-top: 1px solid var(--border); padding: 28px 0 48px; color: var(--muted); font-size: 12px; }
-  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  footer .row { display: flex; gap: 14px; flex-wrap: wrap; }
-
-  @media (max-width: 720px) {
-    header .wrap { height: auto; padding-top: 12px; padding-bottom: 12px; flex-wrap: wrap; }
-    .brand .tag { display: none; }
-    .hero { padding: 48px 0 40px; }
-    main section { padding: 40px 0; }
-    .flag { grid-template-columns: 1fr; gap: 3px; }
-    .ev { grid-template-columns: minmax(0, 1fr) 2.5rem 4.75rem; }
-    .ev .cl { display: none; }
-  }
+/* Header mark appears only after scrolling past the hero (client.ts toggles
+ * .logo-on on the header; utilities on .brand set the hidden state). */
+.logo-on .brand {
+  opacity: 1;
+  transform: none;
+}
 </style>
+<script src="/assets/unocss.js"></script>
 </head>
 <body>
-
-<header>
-  <div class="wrap">
-    <div class="brand">darash<span class="u">_</span><span class="tag">search + fetch + extract</span></div>
-    <nav>
-      <a href="#install">install</a>
-      <a href="#search">search</a>
-      <a href="#fetch">fetch</a>
-      <a href="#api">api</a>
-      <a href="#live">live</a>
-      <a href="https://github.com/tschk/darash">github</a>
-    </nav>
-  </div>
-</header>
-
-<main class="wrap">
-
-  <section class="hero">
-    <h1>darash<span class="u">_</span></h1>
-    <p class="lead">The all-in-one research crate — search + fetch + extract, key-free and deterministic.</p>
-    <p class="tag">$ cargo add darash  <span class="muted"># async search · page fetch · HTML extraction — one dependency, no API keys</span></p>
-    <div class="links">
-      <a href="https://crates.io/crates/darash">crates.io/crates/darash</a>
-      <a href="https://github.com/tschk/darash">github.com/tschk/darash</a>
-      <a href="https://docs.rs/darash">docs.rs/darash</a>
-    </div>
-  </section>
-
-  <section id="install">
-    <h2><span class="p">$</span> install</h2>
-    <p class="sec-lead">One dependency for the whole research loop. The <code>darash</code> binary ships with the crate.</p>
-    <div class="code">
-      <span class="cap">shell</span>
-      <pre><span class="c"># add the crate</span>
-$ <span class="k">cargo add darash</span>
-
-<span class="c"># or install the research binary</span>
-$ <span class="k">cargo install darash</span></pre>
-    </div>
-    <div class="code">
-      <span class="cap">src/main.rs</span>
-      <pre>use darash::{fetch, SearchClient, SearchRequest};
-
-#[tokio::main]
-async fn main() -&gt; Result&lt;(), darash::Error&gt; {
-    let request = SearchRequest::new("rust async");
-    let response = SearchClient::local()?.search_request(&amp;request).await?;
-    for source in response.cited_sources() {
-        println!("{}: {}", source.title, source.url);
-    }
-
-    let report = fetch::fetch("https://example.com", &amp;[]).await?;
-    println!("{}", report.summary());
-    Ok(())
-}</pre>
-    </div>
-  </section>
-
-  <section id="search">
-    <h2><span class="p">$</span> darash search</h2>
-    <p class="sec-lead">Provider-neutral async search. <code>SearchClient::local()</code> runs the in-process multi-source backend; <code>SearchClient::new(endpoint)</code> targets any SearxNG-compatible endpoint. No AI provider is called — results project into citations for the host to synthesize.</p>
-
-    <h3><span class="p">#</span> modes</h3>
-    <div class="flags">
-      <div class="flag"><div class="f">speed</div><div class="d">Selects one provider and returns at most 5 results.</div></div>
-      <div class="flag"><div class="f">balanced <em>(default)</em></div><div class="d">Selects up to two providers and returns at most 10 results.</div></div>
-      <div class="flag"><div class="f">quality</div><div class="d">Selects all requested providers and returns at most 20 results.</div></div>
-    </div>
-
-    <h3><span class="p">#</span> sources</h3>
-    <div class="flags">
-      <div class="flag"><div class="f">web <em>(default)</em></div><div class="d">Queries DuckDuckGo HTML results.</div></div>
-      <div class="flag"><div class="f">academic</div><div class="d">Queries OpenAlex works.</div></div>
-      <div class="flag"><div class="f">discussions</div><div class="d">Queries Hacker News Algolia results.</div></div>
-    </div>
-    <p class="note">Each selected provider contributes up to 5 results in <code>speed</code> and up to 10 in <code>balanced</code> or <code>quality</code>, before URL deduplication and relevance ranking. Every <code>SearchResult</code> carries its title, URL, content, engines, category, publication date, and score.</p>
-
-    <h3><span class="p">#</span> cli</h3>
-    <div class="code">
-      <span class="cap">shell</span>
-      <pre><span class="c"># in-process backend, cited sources</span>
-$ <span class="k">darash search</span> "rust async"
-
-<span class="c"># pick a mode and a source</span>
-$ <span class="k">darash search</span> "rust async" --mode quality --source academic
-
-<span class="c"># point at another SearxNG-compatible endpoint</span>
-$ <span class="k">darash search</span> "rust async" --url http://localhost:8080
-
-<span class="c"># machine-readable results</span>
-$ <span class="k">darash search</span> "rust async" --mode speed --json</pre>
-    </div>
-  </section>
-
-  <section id="fetch">
-    <h2><span class="p">$</span> darash fetch</h2>
-    <p class="sec-lead">Every fetch returns a <code>FetchReport</code> with the status, final URL, redirect flag, elapsed time, content type, size, and body — never silent, even for error statuses. Bodies are capped at 2 MiB. Extraction is local and deterministic.</p>
-
-    <h3><span class="p">#</span> extraction</h3>
-    <div class="flags">
-      <div class="flag"><div class="f">(default)</div><div class="d">Full report as JSON, including the body.</div></div>
-      <div class="flag"><div class="f">--body</div><div class="d">Print only the response body.</div></div>
-      <div class="flag"><div class="f">--md</div><div class="d">Render the page as markdown.</div></div>
-      <div class="flag"><div class="f">--text</div><div class="d">Render the page as plain text.</div></div>
-      <div class="flag"><div class="f">--outline</div><div class="d">Show repeating structures found on the page.</div></div>
-      <div class="flag"><div class="f">--select CSS</div><div class="d">Print text matches for a CSS selector.</div></div>
-      <div class="flag"><div class="f">--count</div><div class="d">With <code>--select</code>, print just the match count.</div></div>
-      <div class="flag"><div class="f">--row "name=sel,url=a@href"</div><div class="d">Extract multi-field rows from a repeating container named by <code>--select</code>.</div></div>
-      <div class="flag"><div class="f">--table</div><div class="d">Extract keyed table rows.</div></div>
-      <div class="flag"><div class="f">--locate TEXT</div><div class="d">Find the deepest element whose text or attribute contains <code>TEXT</code>; prints a CSS selector path and an 80-character snippet.</div></div>
-    </div>
-
-    <h3><span class="p">#</span> pagination, filtering, output</h3>
-    <div class="flags">
-      <div class="flag"><div class="f">--limit N</div><div class="d">Caps a page of structured output. Default 50.</div></div>
-      <div class="flag"><div class="f">--offset N</div><div class="d">Starts the page at <code>N</code> (structured output only).</div></div>
-      <div class="flag"><div class="f">--where EXPR</div><div class="d">Filter <code>--row</code> / <code>--table</code> output with a safe expression language: <code>== != ~ !~ &gt; &gt;= &lt; &lt;=</code>, <code>&amp;&amp;</code>/<code>||</code>/<code>!</code>, <code>/regex/[flags]</code>, and backtick column names.</div></div>
-      <div class="flag"><div class="f">--budget N</div><div class="d">Cut output at item boundaries to an estimated token budget (≈4 chars/token), always keeping at least one item.</div></div>
-      <div class="flag"><div class="f">--json</div><div class="d">Wrap any mode as <code>{"data":…,"meta":{status,ok,url,ms,bytes,count,omitted}}</code>.</div></div>
-      <div class="flag"><div class="f">--json-envelope</div><div class="d">Structured output as <code>{"data":…,"meta":{state,total,offset,returned,next_offset}}</code>, where <code>state</code> is <code>more</code>, <code>complete</code>, or <code>past_end</code>.</div></div>
-    </div>
-    <p class="note">Rows and a single table print as TSV by default; <code>--json</code> switches them to JSON rows, and multiple tables always print as JSON. Omissions and pagination are announced on stderr, never silent.</p>
-
-    <h3><span class="p">#</span> curl reflexes</h3>
-    <div class="flags">
-      <div class="flag"><div class="f">-X, --method M</div><div class="d">Request method.</div></div>
-      <div class="flag"><div class="f">-d, --data BODY|@FILE|@-</div><div class="d">Request body; <code>@file</code> and <code>@-</code> strip CR/LF.</div></div>
-      <div class="flag"><div class="f">--data-raw B</div><div class="d">Body where <code>@</code> is never read as a file.</div></div>
-      <div class="flag"><div class="f">--data-binary B</div><div class="d">Body kept byte for byte.</div></div>
-      <div class="flag"><div class="f">-u USER:PASS</div><div class="d">Basic auth.</div></div>
-      <div class="flag"><div class="f">-I, --head</div><div class="d">HEAD request.</div></div>
-      <div class="flag"><div class="f">-o FILE</div><div class="d">Atomic write to a file (default report or <code>--body</code>).</div></div>
-      <div class="flag"><div class="f">-k, --insecure</div><div class="d">Accept invalid TLS certificates.</div></div>
-      <div class="flag"><div class="f">-m, --max-time SECS</div><div class="d">Request timeout in seconds.</div></div>
-      <div class="flag"><div class="f">--max-bytes N</div><div class="d">Override the 2 MiB fetch body cap.</div></div>
-      <div class="flag"><div class="f">--header 'Name: value'</div><div class="d">Add a request header.</div></div>
-      <div class="flag"><div class="f">-f, --fail</div><div class="d">HTTP error exits 22 after printing the report.</div></div>
-      <div class="flag"><div class="f">-L, -i, -s, -S</div><div class="d">Accepted no-ops, for curl muscle memory.</div></div>
-    </div>
-
-    <h3><span class="p">#</span> cache</h3>
-    <div class="flags">
-      <div class="flag"><div class="f">(default)</div><div class="d">Fetched URL bodies are cached ~2 minutes under the user cache dir and reused by parse modes. Cache hits announce their age on stderr.</div></div>
-      <div class="flag"><div class="f">--fresh</div><div class="d">Refetch and re-cache, ignoring any cached body.</div></div>
-      <div class="flag"><div class="f">--no-cache</div><div class="d">Never read from or write to the cache.</div></div>
-    </div>
-    <p class="note">The cache is bypassed by custom headers, non-<code>GET</code> methods, request bodies, <code>Cache-Control: no-store</code>, and credential-bearing URLs.</p>
-
-    <h3><span class="p">#</span> cli</h3>
-    <div class="code">
-      <span class="cap">shell</span>
-      <pre><span class="c"># full report, JSON (default)</span>
-$ <span class="k">darash fetch</span> https://example.com
-
-<span class="c"># markdown within ~800 tokens</span>
-$ <span class="k">darash fetch</span> https://example.com --md --budget 800
-
-<span class="c"># discover structure, then extract rows</span>
-$ <span class="k">darash fetch</span> https://example.com --outline
-$ <span class="k">darash fetch</span> https://example.com --select ".item" --row "title=h2, url=a@href"
-
-<span class="c"># filter rows, page them, wrap in an envelope</span>
-$ <span class="k">darash fetch</span> https://example.com --select ".item" --row "title=h2, url=a@href" \
-    --where 'title ~ /rust/' --limit 10 --offset 20 --json-envelope
-
-<span class="c"># which selector holds this text?</span>
-$ <span class="k">darash fetch</span> https://example.com --locate "Example Domain"
-
-<span class="c"># curl reflexes + local files work too</span>
-$ <span class="k">darash fetch</span> https://example.com -X POST -d @payload.json --header 'Content-Type: application/json'
-$ <span class="k">darash fetch</span> page.html --md --fresh</pre>
-    </div>
-    <p class="note">Limits: 15 s search timeout, 256 KiB search response cap, 2 MiB fetch body cap, queries ≤ 512 chars, http/https only, no embedded credentials.</p>
-  </section>
-
-  <section id="api">
-    <h2><span class="p">$</span> hosted api</h2>
-    <p class="sec-lead">A hosted instance at <code>https://darash.tsc.hk</code> exposes the same search + fetch loop over HTTP. JSON in, JSON out.</p>
-    <div class="code">
-      <span class="cap">endpoints</span>
-      <pre>GET /api/health
-GET /api/search?q=&amp;mode=&amp;limit=
-GET /api/fetch?url=&amp;md=1&amp;select=&amp;limit=
-GET /api/stats
-GET /api/account   <span class="m"># your usage — requires a key</span></pre>
-    </div>
-    <div class="code">
-      <span class="cap">curl</span>
-      <pre><span class="c"># liveness</span>
-$ <span class="k">curl</span> https://darash.tsc.hk/api/health
-
-<span class="c"># search, quality mode, 10 results</span>
-$ <span class="k">curl</span> "https://darash.tsc.hk/api/search?q=rust+async&amp;mode=quality&amp;limit=10"
-
-<span class="c"># fetch as markdown</span>
-$ <span class="k">curl</span> "https://darash.tsc.hk/api/fetch?url=https://example.com&amp;md=1&amp;limit=50"
-
-<span class="c"># fetch selector matches</span>
-$ <span class="k">curl</span> "https://darash.tsc.hk/api/fetch?url=https://example.com&amp;select=h2&amp;limit=10"
-
-<span class="c"># usage counters</span>
-$ <span class="k">curl</span> https://darash.tsc.hk/api/stats</pre>
-    </div>
-    <p class="sec-lead">Free to use without a key up to fair-use limits (30 req/h per IP). A free key doubles that (60/h, 1,000/day) and tracks your usage — ask for one. Keys pass as <code>Authorization: Bearer dk_…</code>; check <code>GET /api/account</code> for remaining quota.</p>
-  </section>
-
-  <section id="live">
-    <h2><span class="p">$</span> live</h2>
-    <p class="sec-lead">Polling <code>GET /api/stats</code> every 3 s — on the hosted instance or any self-host mirror.</p>
-    <div class="term">
-      <div class="term-bar">
-        <span class="dot" id="live-dot"></span>
-        <span>darash · /api/stats</span>
-        <span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
-      </div>
-      <div class="term-body">
-        <div id="totals" class="muted">connecting…</div>
-        <div id="events"></div>
-      </div>
-    </div>
-  </section>
-
-</main>
-
-<footer>
-  <div class="wrap">
-    <div>darash — ISC licensed. built with rust.</div>
-    <div class="row">
-      <a href="llms.txt">llms.txt</a>
-      <a href="https://github.com/tschk/darash">source</a>
-      <a href="https://crates.io/crates/darash">crates.io</a>
-      <a href="https://docs.rs/darash">docs.rs</a>
-    </div>
-  </div>
-</footer>
-
-<script>
-(function () {
-  "use strict";
-  // Same-origin first: the hosted worker and any self-host mirror both work.
-  // On file:// (local preview) fall back to the hosted instance.
-  var API = location.protocol.startsWith("http") ? "" : "https://darash.tsc.hk";
-  var STATS = "/api/stats";
-  var totalsEl = document.getElementById("totals");
-  var eventsEl = document.getElementById("events");
-  var liveDot = document.getElementById("live-dot");
-
-  function first(obj, keys) {
-    if (!obj) return undefined;
-    for (var i = 0; i < keys.length; i++) {
-      if (obj[keys[i]] !== undefined && obj[keys[i]] !== null) return obj[keys[i]];
-    }
-    return undefined;
-  }
-  function num(v) {
-    var n = Number(v);
-    return isFinite(n) ? n : 0;
-  }
-  function str(v, fallback) {
-    return v === undefined || v === null || v === "" ? (fallback || "") : String(v);
-  }
-  function span(cls, text) {
-    var el = document.createElement("span");
-    el.className = cls;
-    el.textContent = text;
-    return el;
-  }
-
-  function totalsOf(data) {
-    var t = first(data, ["totals", "stats", "counters"]) || data || {};
-    return {
-      requests: num(first(t, ["requests", "total_requests", "totalRequests", "total", "reqs"])),
-      searches: num(first(t, ["searches", "total_searches", "search", "search_count"])),
-      fetches: num(first(t, ["fetches", "total_fetches", "fetch", "fetch_count"])),
-      errors: num(first(t, ["errors", "total_errors", "error", "error_count"]))
-    };
-  }
-
-  function eventsOf(data) {
-    var arr = first(data, ["events", "recent", "recent_events", "live", "live_events", "log"]);
-    return Array.isArray(arr) ? arr.slice() : [];
-  }
-
-  function renderTotals(t) {
-    totalsEl.className = "";
-    totalsEl.textContent = "";
-    var parts = [
-      ["requests", t.requests], ["searches", t.searches],
-      ["fetches", t.fetches], ["errors", t.errors]
-    ];
-    for (var i = 0; i < parts.length; i++) {
-      if (i > 0) totalsEl.appendChild(span("sep", "·"));
-      totalsEl.appendChild(span("lbl", parts[i][0] + " "));
-      totalsEl.appendChild(span("val", String(parts[i][1])));
-    }
-  }
-
-  function renderEvent(e) {
-    var method = str(first(e, ["method", "m"]), "GET").toUpperCase();
-    var path = str(first(e, ["path", "url", "route", "target"]), "/");
-    var kind = str(first(e, ["kind", "type", "op"]), "");
-    var status = str(first(e, ["status", "status_code", "code"]), "—");
-    var ms = first(e, ["ms", "duration_ms", "latency_ms", "elapsed_ms", "duration"]);
-    var client = str(first(e, ["client", "client_id", "clientId", "ip"]), "");
-
-    var row = document.createElement("div");
-    row.className = "ev";
-
-    var req = document.createElement("span");
-    req.className = "req";
-    req.appendChild(span("m", method + " "));
-    req.appendChild(document.createTextNode(path));
-    if (kind) {
-      req.appendChild(document.createTextNode(" "));
-      req.appendChild(span("k", kind));
-    }
-    row.appendChild(req);
-
-    var st = span("st", status);
-    if (num(status) >= 400) st.className = "st err";
-    row.appendChild(st);
-
-    row.appendChild(span("ms", ms === undefined ? "—" : Math.round(num(ms)) + "ms"));
-    row.appendChild(span("cl", client ? "client:" + client : ""));
-    return row;
-  }
-
-  function orderEvents(events) {
-    if (events.length < 2) return events;
-    var a = first(events[0], ["ts", "time", "timestamp", "at"]);
-    var b = first(events[events.length - 1], ["ts", "time", "timestamp", "at"]);
-    if (a !== undefined && b !== undefined && Number(a) < Number(b)) events.reverse();
-    return events;
-  }
-
-  function render(data) {
-    renderTotals(totalsOf(data));
-    var events = orderEvents(eventsOf(data)).slice(0, 10);
-    eventsEl.textContent = "";
-    if (events.length === 0) {
-      eventsEl.appendChild(span("muted", "no events yet"));
-    } else {
-      for (var i = 0; i < events.length; i++) eventsEl.appendChild(renderEvent(events[i]));
-    }
-    liveDot.classList.add("ok");
-  }
-
-  function unavailable() {
-    totalsEl.className = "muted";
-    totalsEl.textContent = "stats unavailable — live panel needs the hosted API";
-    eventsEl.textContent = "";
-    liveDot.classList.remove("ok");
-  }
-
-  function poll() {
-    fetch(API + "/api/stats", { cache: "no-store" })
-      .then(function (r) {
-        if (!r.ok) throw new Error("stats " + r.status);
-        return r.json();
-      })
-      .then(render)
-      .catch(unavailable);
-  }
-
-  poll();
-  setInterval(poll, 3000);
-})();
-</script>
-
+<header class="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/88 backdrop-blur-md"><div class="max-w-[76rem] mx-auto px-5 flex items-center gap-4 h-[52px]"><a class="brand inline-flex items-baseline font-bold tracking-[-0.02em] text-[15px] opacity-0 -translate-y-0.5 transition-all duration-300" href="#top" title="darash — all-in-one research crate">darash<span class="text-blue-500">_</span></a><nav class="ml-auto flex gap-[18px] flex-wrap"><a class="text-zinc-400 text-[12.5px] hover:text-zinc-100 transition-colors" href="#install">install</a><a class="text-zinc-400 text-[12.5px] hover:text-zinc-100 transition-colors" href="#search">search</a><a class="text-zinc-400 text-[12.5px] hover:text-zinc-100 transition-colors" href="#fetch">fetch</a><a class="text-zinc-400 text-[12.5px] hover:text-zinc-100 transition-colors" href="#api">api</a><a class="text-zinc-400 text-[12.5px] hover:text-zinc-100 transition-colors" href="#live">live</a><a class="text-zinc-400 text-[12.5px] hover:text-zinc-100 transition-colors" href="https://github.com/tschk/darash">github</a></nav></div></header><main class="max-w-[76rem] mx-auto px-5"><section id="hero" class="pt-[72px] pb-12 flex flex-col gap-3.5"><h1 class="m-0 text-[clamp(44px,8vw,76px)] leading-none tracking-[-0.04em] font-bold">darash<span class="text-blue-500">_</span></h1><p class="m-0 text-zinc-400 text-[17px] max-w-[46rem]">The all-in-one research crate — search + fetch + extract, key-free and deterministic.</p><p class="m-0 text-zinc-400 text-[13px]">Hebrew <span class="text-blue-500 text-[15px]">דָּרַשׁ</span> (darash) — “to seek, to inquire, to search out.”</p><p class="m-0 text-zinc-100 text-[13px]">$ cargo add darash<span class="text-zinc-500">  # async search · page fetch · HTML extraction — one dependency, no API keys</span></p><div data-island="console"><!--[--><div class="border border-zinc-800 rounded-lg bg-zinc-950 shadow-[0_4px_20px_rgba(0,0,0,0.5)] overflow-hidden"><div class="flex items-center gap-2.5 px-3.5 py-2 border-b border-dashed border-zinc-800 text-zinc-400 text-[11.5px]"><span class="w-2 h-2 rounded-full transition-colors duration-300 bg-zinc-800"></span> <span>darash console · same-origin api</span> <div class="flex gap-1 ml-auto"><button type="button" class="border border-blue-500 bg-zinc-900 text-zinc-100 rounded px-2 py-[3px] text-[11.5px] font-mono cursor-pointer transition-colors">search</button> <button type="button" class="border border-zinc-800 bg-transparent text-zinc-400 rounded px-2 py-[3px] text-[11.5px] font-mono cursor-pointer hover:text-zinc-100 transition-colors">fetch</button></div></div> <div class="px-4 py-3.5 text-[12.5px] min-h-[150px]"><!--[--><form class="flex flex-col gap-3"><div class="flex gap-2"><span class="text-blue-500 select-none shrink-0">$</span> <input class="flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded-md text-zinc-100 font-mono text-[13px] px-2.5 py-[7px] outline-none focus:border-blue-500 placeholder:text-zinc-600" type="text" value="rust async" placeholder="search the web…" aria-label="search query" maxlength="512"/> <button class="border border-blue-500 bg-blue-500 text-zinc-950 rounded-md font-mono text-[12.5px] font-bold px-3.5 py-[7px] cursor-pointer disabled:opacity-50 disabled:cursor-wait" type="submit">run</button></div> <div class="flex flex-wrap items-center gap-2"><!--[--><button type="button" class="border border-zinc-800 bg-transparent text-zinc-400 rounded px-2 py-[3px] text-[11.5px] font-mono cursor-pointer hover:text-zinc-100 transition-colors" title="one provider · ≤5 results">speed</button><button type="button" class="border border-blue-500 bg-zinc-900 text-zinc-100 rounded px-2 py-[3px] text-[11.5px] font-mono cursor-pointer transition-colors" title="two providers · ≤10 results">balanced</button><button type="button" class="border border-zinc-800 bg-transparent text-zinc-400 rounded px-2 py-[3px] text-[11.5px] font-mono cursor-pointer hover:text-zinc-100 transition-colors" title="all providers · ≤20 results">quality</button><!--]--> <select class="w-auto flex-none bg-zinc-900 border border-zinc-800 rounded-md text-zinc-100 font-mono text-[13px] px-2.5 py-[7px] outline-none focus:border-blue-500 placeholder:text-zinc-600" aria-label="result limit"><option value="5">limit 5</option><option value="8" selected>limit 8</option><option value="10">limit 10</option><option value="20">limit 20</option></select></div></form> <div class="mt-3 flex flex-col gap-2"><!--[!--><!--]--> <!--[!--><!--]--> <!--[--><!--]--></div><!--]--></div></div><!--]--></div><div class="flex gap-4 flex-wrap mt-1"><a class="text-zinc-400 text-[12.5px] border border-zinc-800 rounded-md px-2.5 py-[5px] hover:border-blue-500 hover:text-zinc-100 transition-colors" href="https://crates.io/crates/darash">crates.io/crates/darash</a><a class="text-zinc-400 text-[12.5px] border border-zinc-800 rounded-md px-2.5 py-[5px] hover:border-blue-500 hover:text-zinc-100 transition-colors" href="https://github.com/tschk/darash">github.com/tschk/darash</a><a class="text-zinc-400 text-[12.5px] border border-zinc-800 rounded-md px-2.5 py-[5px] hover:border-blue-500 hover:text-zinc-100 transition-colors" href="https://docs.rs/darash">docs.rs/darash</a></div></section><section id="install" class="py-[34px] md:py-11"><h2 class="m-0 mb-2.5 text-[21px] tracking-[-0.01em] text-zinc-100"><span class="text-blue-500">$</span> install</h2><p class="m-0 mb-3.5 text-zinc-400 max-w-[58rem]">One dependency for the whole research loop. The <code>darash</code> binary ships with the crate.</p><div class="border border-zinc-800 rounded-lg bg-zinc-950 mb-3 overflow-hidden"><span class="block px-3 py-1.5 border-b border-dashed border-zinc-800 text-zinc-400 text-[11px] uppercase tracking-[0.08em]">shell</span><pre class="m-0 px-3.5 py-3 text-[12.5px] leading-[1.7] overflow-x-auto"><div class="whitespace-pre"><span class="text-zinc-600"># add the crate</span></div><div class="whitespace-pre">$ <span class="text-blue-500">cargo add darash</span></div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># or install the research binary</span></div><div class="whitespace-pre">$ <span class="text-blue-500">cargo install darash</span></div></pre></div><div class="border border-zinc-800 rounded-lg bg-zinc-950 mb-3 overflow-hidden"><span class="block px-3 py-1.5 border-b border-dashed border-zinc-800 text-zinc-400 text-[11px] uppercase tracking-[0.08em]">src/main.rs</span><pre class="m-0 px-3.5 py-3 text-[12.5px] leading-[1.7] overflow-x-auto"><div class="whitespace-pre">use darash::{fetch, SearchClient, SearchRequest};</div><div class="whitespace-pre"> </div><div class="whitespace-pre">#[tokio::main]</div><div class="whitespace-pre">async fn main() -&gt; Result&lt;(), darash::Error&gt; {</div><div class="whitespace-pre">    let request = SearchRequest::new(&quot;rust async&quot;);</div><div class="whitespace-pre">    let response = SearchClient::local()?.search_request(&amp;request).await?;</div><div class="whitespace-pre">    for source in response.cited_sources() {</div><div class="whitespace-pre">        println!(&quot;{}: {}&quot;, source.title, source.url);</div><div class="whitespace-pre">    }</div><div class="whitespace-pre"> </div><div class="whitespace-pre">    let report = fetch::fetch(&quot;https://example.com&quot;, &amp;[]).await?;</div><div class="whitespace-pre">    println!(&quot;{}&quot;, report.summary());</div><div class="whitespace-pre">    Ok(())</div><div class="whitespace-pre">}</div></pre></div></section><section id="search" class="py-[34px] md:py-11"><h2 class="m-0 mb-2.5 text-[21px] tracking-[-0.01em] text-zinc-100"><span class="text-blue-500">$</span> darash search</h2><p class="m-0 mb-3.5 text-zinc-400 max-w-[58rem]">Provider-neutral async search. <code>SearchClient::local()</code> runs the in-process multi-source backend; <code>SearchClient::new(endpoint)</code> targets any SearxNG-compatible endpoint. No AI provider is called — results project into citations for the host to synthesize.</p><h3 class="mt-6.5 mb-2 text-[15px] text-zinc-100"><span class="text-blue-500">#</span> modes</h3><div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2"><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">speed</div><div class="text-zinc-400 text-[12.5px]">Selects one provider and returns at most 5 results.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">balanced (default)</div><div class="text-zinc-400 text-[12.5px]">Selects up to two providers and returns at most 10 results.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">quality</div><div class="text-zinc-400 text-[12.5px]">Selects all requested providers and returns at most 20 results.</div></div></div><h3 class="mt-6.5 mb-2 text-[15px] text-zinc-100"><span class="text-blue-500">#</span> sources</h3><div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2"><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">web (default)</div><div class="text-zinc-400 text-[12.5px]">Queries the hosted metasearch backend; plug in any SearxNG/websurfx instance.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">academic</div><div class="text-zinc-400 text-[12.5px]">Queries OpenAlex works.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">discussions</div><div class="text-zinc-400 text-[12.5px]">Queries Hacker News Algolia results.</div></div></div><p class="text-zinc-400 text-[12.5px] max-w-[58rem]">Each selected provider contributes up to 5 results in <code>speed</code> and up to 10 in <code>balanced</code> or <code>quality</code>, before URL deduplication and relevance ranking. Every SearchResult carries its title, URL, content, engines, category, publication date, and score.</p><h3 class="mt-6.5 mb-2 text-[15px] text-zinc-100"><span class="text-blue-500">#</span> cli</h3><div class="border border-zinc-800 rounded-lg bg-zinc-950 mb-3 overflow-hidden"><span class="block px-3 py-1.5 border-b border-dashed border-zinc-800 text-zinc-400 text-[11px] uppercase tracking-[0.08em]">shell</span><pre class="m-0 px-3.5 py-3 text-[12.5px] leading-[1.7] overflow-x-auto"><div class="whitespace-pre"><span class="text-zinc-600"># in-process backend, cited sources</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash search</span> &quot;rust async&quot;</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># pick a mode and a source</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash search</span> &quot;rust async&quot; --mode quality --source academic</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># point at another SearxNG-compatible endpoint</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash search</span> &quot;rust async&quot; --url http://localhost:8080</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># machine-readable results</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash search</span> &quot;rust async&quot; --mode speed --json</div></pre></div></section><section id="fetch" class="py-[34px] md:py-11"><h2 class="m-0 mb-2.5 text-[21px] tracking-[-0.01em] text-zinc-100"><span class="text-blue-500">$</span> darash fetch</h2><p class="m-0 mb-3.5 text-zinc-400 max-w-[58rem]">Every fetch returns a FetchReport with the status, final URL, redirect flag, elapsed time, content type, size, and body — never silent, even for error statuses. Bodies are capped at 2 MiB. Extraction is local and deterministic.</p><h3 class="mt-6.5 mb-2 text-[15px] text-zinc-100"><span class="text-blue-500">#</span> extraction</h3><div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2"><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">(default)</div><div class="text-zinc-400 text-[12.5px]">Full report as JSON, including the body.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--body</div><div class="text-zinc-400 text-[12.5px]">Print only the response body.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--md</div><div class="text-zinc-400 text-[12.5px]">Render the page as markdown.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--text</div><div class="text-zinc-400 text-[12.5px]">Render the page as plain text.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--outline</div><div class="text-zinc-400 text-[12.5px]">Show repeating structures found on the page.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--select CSS</div><div class="text-zinc-400 text-[12.5px]">Print text matches for a CSS selector.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--count</div><div class="text-zinc-400 text-[12.5px]">With --select, print just the match count.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--row &quot;name=sel,url=a@href&quot;</div><div class="text-zinc-400 text-[12.5px]">Extract multi-field rows from a repeating container named by --select.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--table</div><div class="text-zinc-400 text-[12.5px]">Extract keyed table rows.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--locate TEXT</div><div class="text-zinc-400 text-[12.5px]">Find the deepest element whose text or attribute contains TEXT; prints a CSS selector path and an 80-character snippet.</div></div></div><h3 class="mt-6.5 mb-2 text-[15px] text-zinc-100"><span class="text-blue-500">#</span> pagination, filtering, output</h3><div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2"><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--limit N</div><div class="text-zinc-400 text-[12.5px]">Caps a page of structured output. Default 50.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--offset N</div><div class="text-zinc-400 text-[12.5px]">Starts the page at N (structured output only).</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--where EXPR</div><div class="text-zinc-400 text-[12.5px]">Filter --row / --table output with a safe expression language: == != ~ !~ &gt; &gt;= &lt; &lt;=, &amp;&amp; / || / !, /regex/[flags], and backtick column names.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--budget N</div><div class="text-zinc-400 text-[12.5px]">Cut output at item boundaries to an estimated token budget (≈4 chars/token), always keeping at least one item.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--json</div><div class="text-zinc-400 text-[12.5px]">Wrap any mode as a data + meta envelope (status, ok, url, ms, bytes, count, omitted).</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--json-envelope</div><div class="text-zinc-400 text-[12.5px]">Structured output as a paginated envelope (state, total, offset, returned, next_offset), where state is more, complete, or past_end.</div></div></div><p class="text-zinc-400 text-[12.5px] max-w-[58rem]">Rows and a single table print as TSV by default; --json switches them to JSON rows, and multiple tables always print as JSON. Omissions and pagination are announced on stderr, never silent.</p><h3 class="mt-6.5 mb-2 text-[15px] text-zinc-100"><span class="text-blue-500">#</span> curl reflexes</h3><div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2"><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">-X, --method M</div><div class="text-zinc-400 text-[12.5px]">Request method.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">-d, --data BODY|@FILE|@-</div><div class="text-zinc-400 text-[12.5px]">Request body; @file and @- strip CR/LF.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--data-raw B</div><div class="text-zinc-400 text-[12.5px]">Body where @ is never read as a file.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--data-binary B</div><div class="text-zinc-400 text-[12.5px]">Body kept byte for byte.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">-u USER:PASS</div><div class="text-zinc-400 text-[12.5px]">Basic auth.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">-I, --head</div><div class="text-zinc-400 text-[12.5px]">HEAD request.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">-o FILE</div><div class="text-zinc-400 text-[12.5px]">Atomic write to a file (default report or --body).</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">-k, --insecure</div><div class="text-zinc-400 text-[12.5px]">Accept invalid TLS certificates.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">-m, --max-time SECS</div><div class="text-zinc-400 text-[12.5px]">Request timeout in seconds.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--max-bytes N</div><div class="text-zinc-400 text-[12.5px]">Override the 2 MiB fetch body cap.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--header &#39;Name: value&#39;</div><div class="text-zinc-400 text-[12.5px]">Add a request header.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">-f, --fail</div><div class="text-zinc-400 text-[12.5px]">HTTP error exits 22 after printing the report.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">-L, -i, -s, -S</div><div class="text-zinc-400 text-[12.5px]">Accepted no-ops, for curl muscle memory.</div></div></div><h3 class="mt-6.5 mb-2 text-[15px] text-zinc-100"><span class="text-blue-500">#</span> cache</h3><div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2"><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">(default)</div><div class="text-zinc-400 text-[12.5px]">Fetched URL bodies are cached ~2 minutes under the user cache dir and reused by parse modes. Cache hits announce their age on stderr.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--fresh</div><div class="text-zinc-400 text-[12.5px]">Refetch and re-cache, ignoring any cached body.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">--no-cache</div><div class="text-zinc-400 text-[12.5px]">Never read from or write to the cache.</div></div></div><p class="text-zinc-400 text-[12.5px] max-w-[58rem]">The cache is bypassed by custom headers, non-GET methods, request bodies, Cache-Control: no-store, and credential-bearing URLs.</p><h3 class="mt-6.5 mb-2 text-[15px] text-zinc-100"><span class="text-blue-500">#</span> cli</h3><div class="border border-zinc-800 rounded-lg bg-zinc-950 mb-3 overflow-hidden"><span class="block px-3 py-1.5 border-b border-dashed border-zinc-800 text-zinc-400 text-[11px] uppercase tracking-[0.08em]">shell</span><pre class="m-0 px-3.5 py-3 text-[12.5px] leading-[1.7] overflow-x-auto"><div class="whitespace-pre"><span class="text-zinc-600"># full report, JSON (default)</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash fetch</span> https://example.com</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># markdown within ~800 tokens</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash fetch</span> https://example.com --md --budget 800</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># discover structure, then extract rows</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash fetch</span> https://example.com --outline</div><div class="whitespace-pre">$ <span class="text-blue-500">darash fetch</span> https://example.com --select &quot;.item&quot; --row &quot;title=h2, url=a@href&quot;</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># filter rows, page them, wrap in an envelope</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash fetch</span> https://example.com --select &quot;.item&quot; --row &quot;title=h2, url=a@href&quot; \</div><div class="whitespace-pre">    --where &#39;title ~ /rust/&#39; --limit 10 --offset 20 --json-envelope</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># which selector holds this text?</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash fetch</span> https://example.com --locate &quot;Example Domain&quot;</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># curl reflexes + local files work too</span></div><div class="whitespace-pre">$ <span class="text-blue-500">darash fetch</span> https://example.com -X POST -d @payload.json --header &#39;Content-Type: application/json&#39;</div><div class="whitespace-pre">$ <span class="text-blue-500">darash fetch</span> page.html --md --fresh</div></pre></div><p class="text-zinc-400 text-[12.5px] max-w-[58rem]">Limits: 15 s search timeout, 256 KiB search response cap, 2 MiB fetch body cap, queries ≤ 512 chars, http/https only, no embedded credentials.</p></section><section id="api" class="py-[34px] md:py-11"><h2 class="m-0 mb-2.5 text-[21px] tracking-[-0.01em] text-zinc-100"><span class="text-blue-500">$</span> hosted api</h2><p class="m-0 mb-3.5 text-zinc-400 max-w-[58rem]">A hosted instance at <code>https://darash.tsc.hk</code> exposes the same search + fetch loop over HTTP — same-origin, JSON in, JSON out. The live panel at the bottom of this page is the hosted API talking about itself.</p><div class="border border-zinc-800 rounded-lg bg-zinc-950 mb-3 overflow-hidden"><span class="block px-3 py-1.5 border-b border-dashed border-zinc-800 text-zinc-400 text-[11px] uppercase tracking-[0.08em]">endpoints</span><pre class="m-0 px-3.5 py-3 text-[12.5px] leading-[1.7] overflow-x-auto"><div class="whitespace-pre">GET  /api/health</div><div class="whitespace-pre">GET  /api/search?q=&amp;mode=speed|balanced|quality&amp;limit=</div><div class="whitespace-pre">GET  /api/fetch?url=&amp;md=1&amp;text=1&amp;outline=1&amp;select=&amp;limit=&amp;budget=</div><div class="whitespace-pre">POST /api/batch              <span class="text-zinc-600"># free key — concurrent fetch, cap 20 (pro 45)</span></div><div class="whitespace-pre">POST /api/async/jobs         <span class="text-zinc-600"># free key — background job, poll the result</span></div><div class="whitespace-pre">GET  /api/async/jobs/&lt;id&gt;    <span class="text-zinc-600"># job status + results</span></div><div class="whitespace-pre">POST /api/research           <span class="text-zinc-600"># pro — search + fetch a source corpus</span></div><div class="whitespace-pre">GET  /api/account            <span class="text-zinc-600"># your usage — requires a key</span></div><div class="whitespace-pre">GET  /api/stats              <span class="text-zinc-600"># public totals</span></div><div class="whitespace-pre">GET  /api/live               <span class="text-zinc-600"># public websocket event stream</span></div></pre></div><div class="border border-zinc-800 rounded-lg bg-zinc-950 mb-3 overflow-hidden"><span class="block px-3 py-1.5 border-b border-dashed border-zinc-800 text-zinc-400 text-[11px] uppercase tracking-[0.08em]">curl</span><pre class="m-0 px-3.5 py-3 text-[12.5px] leading-[1.7] overflow-x-auto"><div class="whitespace-pre"><span class="text-zinc-600"># liveness</span></div><div class="whitespace-pre">$ <span class="text-blue-500">curl</span> https://darash.tsc.hk/api/health</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># search, quality mode, 10 results</span></div><div class="whitespace-pre">$ <span class="text-blue-500">curl</span> &quot;https://darash.tsc.hk/api/search?q=rust+async&amp;mode=quality&amp;limit=10&quot;</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># fetch as markdown</span></div><div class="whitespace-pre">$ <span class="text-blue-500">curl</span> &quot;https://darash.tsc.hk/api/fetch?url=https://example.com&amp;md=1&quot;</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># batch fetch with a free key</span></div><div class="whitespace-pre">$ <span class="text-blue-500">curl</span> -X POST https://darash.tsc.hk/api/batch \</div><div class="whitespace-pre">    -H &quot;authorization: Bearer dk_…&quot; -H &#39;content-type: application/json&#39; \</div><div class="whitespace-pre">    -d &#39;{&quot;urls&quot;: [&quot;https://example.com&quot;]}&#39;</div><div class="whitespace-pre"> </div><div class="whitespace-pre"><span class="text-zinc-600"># research corpus (pro)</span></div><div class="whitespace-pre">$ <span class="text-blue-500">curl</span> -X POST https://darash.tsc.hk/api/research \</div><div class="whitespace-pre">    -H &quot;authorization: Bearer dk_…&quot; -d &#39;{&quot;query&quot;: &quot;rust async&quot;, &quot;limit&quot;: 3}&#39;</div></pre></div><h3 class="mt-6.5 mb-2 text-[15px] text-zinc-100"><span class="text-blue-500">#</span> keys &amp; limits</h3><div class="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-2"><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">anonymous</div><div class="text-zinc-400 text-[12.5px]">No key needed: search + fetch at 30 requests/hour, 100/day per IP. That is the only limit an IP ever hits.</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">free key</div><div class="text-zinc-400 text-[12.5px]">Unmetered search + fetch, plus batch (cap 20) and background async jobs. Ask for one — keys pass as Authorization: Bearer dk_…</div></div><div class="border border-zinc-800 rounded-md px-3 py-[9px] bg-zinc-900 grid grid-cols-1 sm:grid-cols-[minmax(9.5rem,max-content)_1fr] gap-y-[3px] gap-x-3.5 items-baseline"><div class="text-blue-500 text-[12.5px]">pro key</div><div class="text-zinc-400 text-[12.5px]">Everything free has, a batch cap of 45, and /api/research: a search that fetches the top pages and returns a per-source markdown corpus.</div></div></div><p class="text-zinc-400 text-[12.5px] max-w-[58rem]">Keys are never rate-limited — only anonymous traffic is. Check GET /api/account for your usage snapshot. Rate-limit responses carry Retry-After.</p></section><section id="live" class="py-[34px] md:py-11"><h2 class="m-0 mb-2.5 text-[21px] tracking-[-0.01em] text-zinc-100"><span class="text-blue-500">$</span> live</h2><p class="m-0 mb-3.5 text-zinc-400 max-w-[58rem]">Streaming GET /api/live over a websocket (polling GET /api/stats as fallback) — obfuscated client ids, real request shapes, from the hosted instance or any self-host mirror.</p><div data-island="live"><!--[--><div class="border border-zinc-800 rounded-lg bg-zinc-950 shadow-[0_4px_20px_rgba(0,0,0,0.5)] overflow-hidden"><div class="flex items-center gap-2.5 px-3.5 py-2 border-b border-dashed border-zinc-800 text-zinc-400 text-[11.5px]"><span class="w-2 h-2 rounded-full transition-colors duration-300 bg-zinc-800"></span> <span>darash · /api/live</span> <span class="text-zinc-600 ml-auto">connecting</span></div> <div class="px-4 py-3.5 text-[12.5px] min-h-[150px]"><div class="text-zinc-200 mb-3 pb-2 border-b border-dashed border-zinc-800"><span class="text-zinc-500">requests</span> 0 <span class="text-zinc-700 px-1">·</span> <span class="text-zinc-500">searches</span> 0 <span class="text-zinc-700 px-1">·</span> <span class="text-zinc-500">fetches</span> 0 <span class="text-zinc-700 px-1">·</span> <span class="text-zinc-500">errors</span> 0</div> <div class="flex flex-col gap-1.5"><!--[--><p class="text-zinc-600">no events yet — run a search above</p><!--]--></div></div></div><!--]--></div></section></main><</main>></</main>><footer class="border-t border-zinc-800 pt-6 pb-11 text-zinc-400 text-xs"><div class="max-w-[76rem] mx-auto px-5 flex justify-between gap-4 flex-wrap"><div>darash — ISC licensed. built with rust.</div><div class="flex gap-3.5 flex-wrap"><a class="hover:text-zinc-100 transition-colors" href="llms.txt">llms.txt</a><a class="hover:text-zinc-100 transition-colors" href="https://github.com/tschk/darash">source</a><a class="hover:text-zinc-100 transition-colors" href="https://crates.io/crates/darash">crates.io</a><a class="hover:text-zinc-100 transition-colors" href="https://docs.rs/darash">docs.rs</a></div></div></footer>
+<script type="module" src="/assets/islands.js"></script>
 </body>
 </html>

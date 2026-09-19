@@ -4,4 +4,6 @@
 worker/target
 worker/build
 worker/.wrangler
+web/.wrangler
+site-src/.cache
 node_modules

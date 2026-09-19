@@ -1,0 +1,16 @@
+{
+  "name": "@tschk/darash-site-src",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "bun run build.ts"
+  },
+  "dependencies": {
+    "@tschk/moonshine": "^0.4.1",
+    "svelte": "5.46.4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3"
+  }
+}

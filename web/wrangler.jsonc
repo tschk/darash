@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "darash-web",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "../site",
+    "binding": "ASSETS"
+  },
+  "services": [
+    { "binding": "API", "service": "darash-site" }
+  ],
+  "routes": [
+    { "pattern": "darash.tsc.hk", "zone_name": "tsc.hk", "custom_domain": true }
+  ],
+  "observability": { "enabled": true }
+}

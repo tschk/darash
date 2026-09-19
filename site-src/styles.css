@@ -1,0 +1,48 @@
+/* darash — base layer only.
+ * All layout, spacing, and color live as UnoCSS utilities in the markup
+ * (index.crepus + the Svelte islands). This file is the pre-hydration base:
+ * fonts, colors, inline-code chrome, and the header logo reveal state.
+ */
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: #09090b;
+  color: #f4f4f5;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+code {
+  font-family: inherit;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 12.5px;
+}
+
+/* Header mark appears only after scrolling past the hero (client.ts toggles
+ * .logo-on on the header; utilities on .brand set the hidden state). */
+.logo-on .brand {
+  opacity: 1;
+  transform: none;
+}

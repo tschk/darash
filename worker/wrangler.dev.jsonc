@@ -1,3 +1,8 @@
+// Dev-only mirror of wrangler.jsonc for multi-worker local dev
+// (`wrangler dev -c ../web/wrangler.jsonc -c wrangler.dev.jsonc`).
+// Multi-worker dev runs secondary builds from the wrong cwd, so this config
+// expects `build/index.js` to exist: run `worker-build --release` in worker/
+// first. Deployments keep using wrangler.jsonc, which builds from source.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "darash-site",
@@ -16,10 +21,5 @@
     { "tag": "v1", "new_sqlite_classes": ["Counter"] },
     { "tag": "v2", "new_sqlite_classes": ["Accounts"] }
   ],
-  "build": {
-    "command": "cargo install -q worker-build --version 0.8.6 && worker-build --release",
-    "watch_dir": ["src"]
-  },
-  "vars": {},
   "observability": { "enabled": true }
 }
