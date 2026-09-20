@@ -11,6 +11,17 @@
   let error = $state("");
   let elapsed = $state<number | null>(null);
   let instances = $state<string[]>([]);
+  let tickMs = $state(0);
+  let tickTimer: ReturnType<typeof setInterval> | undefined;
+
+  function startTick() {
+    tickMs = 0;
+    tickTimer = setInterval(() => (tickMs += 50), 50);
+  }
+  function stopTick() {
+    if (tickTimer !== undefined) clearInterval(tickTimer);
+    tickTimer = undefined;
+  }
 
   type Result = { title: string; url: string; content: string; engine: string; score: number };
   let results = $state<Result[]>([]);
@@ -38,18 +49,19 @@
     results = [];
     elapsed = null;
     instances = [];
-    const started = performance.now();
+    startTick();
     try {
       const data = (await apiGet(
         `/api/search?q=${encodeURIComponent(q)}&mode=${mode}&limit=${limit}`,
       )) as { data?: { results?: Result[] }; meta?: { ms?: number; instances?: string[] } };
       results = data.data?.results ?? [];
-      elapsed = data.meta?.ms ?? Math.round(performance.now() - started);
+      elapsed = data.meta?.ms ?? tickMs;
       instances = data.meta?.instances ?? [];
       if (results.length === 0) error = "no results";
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
+      stopTick();
       busy = false;
     }
   }
@@ -165,6 +177,21 @@
       <div class="mt-3 flex flex-col gap-2">
         {#if error}
           <p class="text-red-500">error: {error}</p>
+        {/if}
+        {#if busy}
+          <p class="text-zinc-500" role="status">
+            searching{tickMs >= 600 ? `… ${tickMs}ms` : "…"}
+          </p>
+          {#each Array.from({ length: Math.min(limit, 5) }) as _, i (i)}
+            <div
+              class="flex flex-col gap-1.5 py-1.5 border-b border-dashed border-zinc-800 animate-pulse"
+              aria-hidden="true"
+            >
+              <div class="h-3.5 w-[45%] bg-zinc-800 rounded"></div>
+              <div class="h-2.5 w-[65%] bg-zinc-800/70 rounded"></div>
+              <div class="h-2.5 w-[88%] bg-zinc-800/50 rounded"></div>
+            </div>
+          {/each}
         {/if}
         {#if elapsed !== null}
           <p class="text-zinc-500">

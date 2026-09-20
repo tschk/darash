@@ -6,15 +6,25 @@
 //! self-hosted searxng/websurfx instance can be plugged in without a redeploy
 //! of code — just an env var change.
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use serde_json::{json, Value};
+use std::future::Future;
+use std::pin::Pin;
 use worker::*;
 
 use crate::{http_get, http_get_json};
 
+/// One racer in the provider race: its display name plus its result.
+type Race<'a> =
+    Pin<Box<dyn Future<Output = (String, std::result::Result<Vec<Value>, String>)> + 'a>>;
+
 pub(crate) const USER_AGENT: &str =
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 darash-worker/0.1.0";
 
-const SEARCH_TIMEOUT_MS: u32 = 4_000;
+/// SearXNG answers its JSON API fast or not at all; a long timeout only adds
+/// latency when an instance is rate-limiting datacenter egress.
+const SEARXNG_TIMEOUT_MS: u64 = 2_500;
+const FALLBACK_TIMEOUT_MS: u64 = 5_000;
 const DEFAULT_INSTANCES: [&str; 5] = [
     "https://searx.be",
     "https://priv.au",
@@ -75,37 +85,41 @@ pub(crate) async fn handle(req: &Request, env: &Env) -> Result<Response> {
     let mut lists: Vec<Vec<Value>> = Vec::new();
     let mut failures: Vec<String> = Vec::new();
 
-    for base in &instances {
-        if lists.len() >= wanted {
-            break;
-        }
-        match query_searxng(base, &query).await {
+    // Race every source at once — SearXNG instances and the bing/marginalia
+    // fallbacks together — and stop as soon as `wanted` engines have
+    // answered. Wall time is the Nth-fastest source, not the sum of
+    // timeouts; a dead instance no longer delays the fallback that
+    // replaces it, and losing races are dropped mid-flight.
+    let mut races: FuturesUnordered<Race> = instances
+        .iter()
+        .cloned()
+        .map(|base| {
+            let query = query.as_str();
+            Box::pin(async move {
+                let outcome = query_searxng(&base, query).await;
+                (base, outcome)
+            }) as Race
+        })
+        .collect();
+    races.push(Box::pin(async { ("bing".to_string(), query_bing_rss(&query).await) }) as Race);
+    races.push(Box::pin(async {
+        ("marginalia".to_string(), query_marginalia(&query).await)
+    }) as Race);
+
+    while let Some((base, outcome)) = races.next().await {
+        match outcome {
             Ok(results) if !results.is_empty() => {
-                used.push(base.clone());
+                used.push(base);
                 lists.push(results);
             }
             Ok(_) => failures.push(format!("{base}: no results")),
             Err(error) => failures.push(format!("{base}: {error}")),
         }
-    }
-
-    if lists.is_empty() {
-        let attempts = [
-            ("bing", query_bing_rss(&query).await),
-            ("marginalia", query_marginalia(&query).await),
-        ];
-        for (name, outcome) in attempts {
-            match outcome {
-                Ok(results) if !results.is_empty() => {
-                    used.push(name.to_string());
-                    lists.push(results);
-                    break;
-                }
-                Ok(_) => failures.push(format!("{name}: no results")),
-                Err(error) => failures.push(format!("{name}: {error}")),
-            }
+        if lists.len() >= wanted {
+            break;
         }
     }
+    drop(races);
 
     if lists.is_empty() {
         return Ok(Response::from_json(&json!({
@@ -128,7 +142,7 @@ async fn query_searxng(base: &str, query: &str) -> std::result::Result<Vec<Value
         base.trim_end_matches('/'),
         urlencode(query)
     );
-    let body = http_get_json(&url, SEARCH_TIMEOUT_MS as u64)
+    let body = http_get_json(&url, SEARXNG_TIMEOUT_MS)
         .await
         .map_err(|error| error.to_string())?;
     let Some(results) = body["results"].as_array() else {
@@ -159,7 +173,7 @@ async fn query_bing_rss(query: &str) -> std::result::Result<Vec<Value>, String> 
     );
     let xml = http_get(
         &url,
-        (SEARCH_TIMEOUT_MS * 2) as u64,
+        FALLBACK_TIMEOUT_MS,
         "text/html,text/xml,application/json",
     )
     .await
@@ -203,7 +217,7 @@ async fn query_marginalia(query: &str) -> std::result::Result<Vec<Value>, String
         "https://api.marginalia.nu/public/search/{}",
         urlencode(query)
     );
-    let body = http_get_json(&url, (SEARCH_TIMEOUT_MS * 2) as u64)
+    let body = http_get_json(&url, FALLBACK_TIMEOUT_MS)
         .await
         .map_err(|error| error.to_string())?;
     let Some(results) = body["results"].as_array() else {
