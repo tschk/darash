@@ -225,7 +225,7 @@ fn matches_allowlist_result(result: &SearchResult, config: &SearchConfig) -> boo
         .allowlist
         .iter()
         .filter(|term| !term.trim().is_empty())
-        .any(|term| value.contains(&term.to_ascii_lowercase()))
+        .any(|term| value.contains(term.as_str()))
 }
 
 fn matches_blocklist_result(result: &SearchResult, config: &SearchConfig) -> bool {

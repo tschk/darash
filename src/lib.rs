@@ -437,7 +437,10 @@ impl SearchConfig {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.allowlist = terms.into_iter().map(Into::into).collect();
+        self.allowlist = terms
+            .into_iter()
+            .map(|term| term.into().to_ascii_lowercase())
+            .collect();
         self
     }
 
