@@ -29,5 +29,32 @@ fn bench_citation(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_citation);
+fn bench_blocklist_sim(c: &mut Criterion) {
+    let blocklist = vec!["bad".to_string(), "terrible".to_string(), "awful".to_string(), "spam".to_string()];
+    let result = "This is a good result without any bad words, oops there is one";
+
+    c.bench_function("matches_blocklist_baseline", |b| {
+        b.iter(|| {
+            let value = result.to_ascii_lowercase();
+            black_box(blocklist.iter()
+                .filter(|term| !term.trim().is_empty())
+                .any(|term| value.contains(&term.to_ascii_lowercase())))
+        })
+    });
+
+    let pre_lowercased_blocklist: Vec<String> = blocklist.iter()
+        .filter(|term| !term.trim().is_empty())
+        .map(|term| term.to_ascii_lowercase())
+        .collect();
+
+    c.bench_function("matches_blocklist_optimized", |b| {
+        b.iter(|| {
+            let value = result.to_ascii_lowercase();
+            black_box(pre_lowercased_blocklist.iter()
+                .any(|term| value.contains(term)))
+        })
+    });
+}
+
+criterion_group!(benches, bench_citation, bench_blocklist_sim);
 criterion_main!(benches);

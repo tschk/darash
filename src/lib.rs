@@ -428,7 +428,12 @@ impl SearchConfig {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.blocklist = terms.into_iter().map(Into::into).collect();
+        self.blocklist = terms
+            .into_iter()
+            .map(Into::into)
+            .filter(|term| !term.trim().is_empty())
+            .map(|term| term.to_ascii_lowercase())
+            .collect();
         self
     }
 
@@ -437,7 +442,12 @@ impl SearchConfig {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.allowlist = terms.into_iter().map(Into::into).collect();
+        self.allowlist = terms
+            .into_iter()
+            .map(Into::into)
+            .filter(|term| !term.trim().is_empty())
+            .map(|term| term.to_ascii_lowercase())
+            .collect();
         self
     }
 
