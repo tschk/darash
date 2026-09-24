@@ -211,19 +211,13 @@ fn providers(query: &SearchQuery) -> Vec<Provider> {
 
 fn matches_blocklist(value: &str, config: &SearchConfig) -> bool {
     let value = value.to_ascii_lowercase();
-    config
-        .blocklist
-        .iter()
-        .any(|term| value.contains(term))
+    config.blocklist.iter().any(|term| value.contains(term))
 }
 
 fn matches_allowlist_result(result: &SearchResult, config: &SearchConfig) -> bool {
     let value = format!("{} {} {}", result.title, result.url, result.content);
     let value = value.to_ascii_lowercase();
-    config
-        .allowlist
-        .iter()
-        .any(|term| value.contains(term))
+    config.allowlist.iter().any(|term| value.contains(term))
 }
 
 fn matches_blocklist_result(result: &SearchResult, config: &SearchConfig) -> bool {

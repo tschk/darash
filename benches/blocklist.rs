@@ -24,7 +24,11 @@ fn bench_blocklist(c: &mut Criterion) {
         "tracker".to_string(),
         "ads".to_string(),
     ];
-    let pre_lowercased_blocklist: Vec<String> = blocklist.iter().filter(|term| !term.trim().is_empty()).map(|term| term.to_ascii_lowercase()).collect();
+    let pre_lowercased_blocklist: Vec<String> = blocklist
+        .iter()
+        .filter(|term| !term.trim().is_empty())
+        .map(|term| term.to_ascii_lowercase())
+        .collect();
 
     let value = "A very long string that we want to check against our blocklist but it does not contain any blocked terms".to_string();
 
@@ -36,7 +40,10 @@ fn bench_blocklist(c: &mut Criterion) {
     });
     group.bench_function("matches_blocklist_optimized", |b| {
         b.iter(|| {
-            black_box(matches_blocklist_optimized(black_box(&value), black_box(&pre_lowercased_blocklist)));
+            black_box(matches_blocklist_optimized(
+                black_box(&value),
+                black_box(&pre_lowercased_blocklist),
+            ));
         })
     });
     group.finish();
