@@ -1,5 +1,24 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use darash::SearchResult;
+use darash::{SearchRequest, SearchResult, SearchSource};
+
+fn bench_with_sources(c: &mut Criterion) {
+    let mut group = c.benchmark_group("with_sources");
+    group.bench_function("with_sources", |b| {
+        b.iter(|| {
+            let request = SearchRequest::new("test");
+            let sources = vec![
+                SearchSource::Web,
+                SearchSource::Academic,
+                SearchSource::Discussions,
+                SearchSource::Web,
+                SearchSource::Academic,
+                SearchSource::Discussions,
+            ];
+            black_box(request.with_sources(sources));
+        })
+    });
+    group.finish();
+}
 
 fn bench_citation(c: &mut Criterion) {
     let result = SearchResult {
@@ -29,5 +48,5 @@ fn bench_citation(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_citation);
+criterion_group!(benches, bench_with_sources, bench_citation);
 criterion_main!(benches);
