@@ -1087,6 +1087,21 @@ mod tests {
     }
 
     #[test]
+    fn plain_renders_headings_links_and_lists() {
+        let text = to_text(FIXTURE);
+        assert!(text.starts_with("Shop\n\n"));
+        assert!(text.contains("Welcome to the shop."));
+        assert!(text.contains("- One\n- Two"));
+        assert!(text.contains("> Quoted text"));
+        assert!(text.contains("let x = 1;"));
+        assert!(!text.contains("```"));
+        assert!(text.contains("details"));
+        assert!(!text.contains("[details]"));
+        assert!(!text.contains("alert"));
+        assert!(!text.contains("color:red"));
+    }
+
+    #[test]
     fn markdown_links_use_href_labels_when_empty() {
         let markdown = to_markdown("<p><a href=\"/go\"></a></p>");
         assert!(markdown.contains("[/go](/go)"));
