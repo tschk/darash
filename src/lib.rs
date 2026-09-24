@@ -107,7 +107,7 @@ pub enum SearchMode {
     Quality,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Ord, PartialOrd)]
 #[serde(rename_all = "lowercase")]
 pub enum SearchSource {
     #[default]
@@ -224,12 +224,9 @@ impl SearchRequest {
     where
         I: IntoIterator<Item = SearchSource>,
     {
-        let mut selected = Vec::new();
-        for source in sources {
-            if !selected.contains(&source) {
-                selected.push(source);
-            }
-        }
+        let mut selected: Vec<_> = sources.into_iter().collect();
+        selected.sort_unstable();
+        selected.dedup();
         self.sources = if selected.is_empty() {
             vec![SearchSource::default()]
         } else {
