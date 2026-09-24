@@ -48,6 +48,16 @@ enum Provider {
     Discussions,
 }
 
+impl From<Provider> for crate::SearchSource {
+    fn from(provider: Provider) -> Self {
+        match provider {
+            Provider::Web => Self::Web,
+            Provider::Academic => Self::Academic,
+            Provider::Discussions => Self::Discussions,
+        }
+    }
+}
+
 impl Provider {
     fn name(self) -> &'static str {
         match self {
@@ -58,11 +68,7 @@ impl Provider {
     }
 
     fn category(self) -> &'static str {
-        match self {
-            Self::Web => "general",
-            Self::Academic => "science",
-            Self::Discussions => "social media",
-        }
+        crate::SearchSource::from(self).category()
     }
 
     fn from_name(name: &str) -> Option<Self> {
