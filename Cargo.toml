@@ -15,12 +15,13 @@ futures-util = { version = "0.3", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"], optional = true }
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"], optional = true }
 scraper = "0.26"
 url = "2"
 log = "0.4.33"
 regex = "1"
 sha2 = "0.10"
+criterion = { version = "0.5", features = ["async_tokio"] }
 
 [features]
 default = ["client", "search"]
@@ -39,4 +40,8 @@ required-features = ["client"]
 
 [[bench]]
 name = "bench"
+harness = false
+
+[[bench]]
+name = "read_source"
 harness = false
