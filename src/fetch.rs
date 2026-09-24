@@ -1132,12 +1132,75 @@ mod tests {
     }
 
     #[test]
+    fn parse_row_spec_parses_valid_specs() {
+        let single = parse_row_spec("name=selector").expect("valid spec");
+        assert_eq!(single, vec![("name".to_owned(), "selector".to_owned())]);
+
+        let multiple = parse_row_spec("title=h1, url=a@href").expect("valid spec");
+        assert_eq!(
+            multiple,
+            vec![
+                ("title".to_owned(), "h1".to_owned()),
+                ("url".to_owned(), "a@href".to_owned())
+            ]
+        );
+
+        let with_whitespace =
+            parse_row_spec("  name  =  selector  ,  name2  =  selector2  ").expect("valid spec");
+        assert_eq!(
+            with_whitespace,
+            vec![
+                ("name".to_owned(), "selector".to_owned()),
+                ("name2".to_owned(), "selector2".to_owned())
+            ]
+        );
+
+        let extraneous_commas = parse_row_spec("name=selector,, ,").expect("valid spec");
+        assert_eq!(
+            extraneous_commas,
+            vec![("name".to_owned(), "selector".to_owned())]
+        );
+
+        let multiple_equals = parse_row_spec("name=sel=ector").expect("valid spec");
+        assert_eq!(
+            multiple_equals,
+            vec![("name".to_owned(), "sel=ector".to_owned())]
+        );
+    }
+
+    #[test]
     fn row_spec_rejects_malformed_fields() {
         let error = parse_row_spec("title").expect_err("missing = is rejected");
         assert!(error.to_string().contains("missing '='"));
 
         let error = parse_row_spec("").expect_err("empty spec is rejected");
         assert!(error.to_string().contains("empty"));
+
+        let error = parse_row_spec(",,,").expect_err("only commas is empty");
+        assert!(error.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn parse_row_spec_rejects_missing_names_or_selectors() {
+        let error = parse_row_spec("=selector").expect_err("empty name");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
+
+        let error = parse_row_spec("name=").expect_err("empty selector");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
+
+        let error = parse_row_spec("=").expect_err("empty name and selector");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
+
+        let error = parse_row_spec("a=b, =c").expect_err("one valid, one invalid");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
     }
 
     #[test]
