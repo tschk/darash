@@ -1241,6 +1241,55 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_row_spec() -> Result<(), Error> {
+        // Valid specs
+        let spec = "url=a@href, title=h2";
+        let parsed = parse_row_spec(spec)?;
+        assert_eq!(
+            parsed,
+            vec![
+                ("url".to_string(), "a@href".to_string()),
+                ("title".to_string(), "h2".to_string())
+            ]
+        );
+
+        let spec = "name=.title";
+        let parsed = parse_row_spec(spec)?;
+        assert_eq!(parsed, vec![("name".to_string(), ".title".to_string())]);
+
+        // Empty parts skipped
+        let spec = "url=a@href, , title=h2";
+        let parsed = parse_row_spec(spec)?;
+        assert_eq!(
+            parsed,
+            vec![
+                ("url".to_string(), "a@href".to_string()),
+                ("title".to_string(), "h2".to_string())
+            ]
+        );
+
+        // Missing '='
+        let spec = "url=a@href, title";
+        let err = parse_row_spec(spec).unwrap_err();
+        assert!(matches!(err, Error::InvalidSelector(_)));
+        assert!(err.to_string().contains("missing '='"));
+
+        // Missing name
+        let spec = "=a@href, title=h2";
+        let err = parse_row_spec(spec).unwrap_err();
+        assert!(matches!(err, Error::InvalidSelector(_)));
+        assert!(err.to_string().contains("needs both a name and a selector"));
+
+        // Missing selector
+        let spec = "url= , title=h2";
+        let err = parse_row_spec(spec).unwrap_err();
+        assert!(matches!(err, Error::InvalidSelector(_)));
+        assert!(err.to_string().contains("needs both a name and a selector"));
+
+        Ok(())
+    }
+
+    #[test]
     fn locate_prefers_attribute_hits_for_the_owning_element() {
         let hits = locate("<p><a href=\"/needle\">x</a></p>", "needle");
         assert_eq!(hits.len(), 1);
