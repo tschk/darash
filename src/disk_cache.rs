@@ -11,13 +11,13 @@
 //! requirement. Credential-bearing URLs, custom headers, non-`GET` requests,
 //! request bodies, and `Cache-Control: no-store` all bypass it.
 
-use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
 
 use crate::fetch::FetchReport;
 
@@ -53,15 +53,15 @@ pub fn cache_key(url: &str) -> String {
 }
 
 /// Read a fresh cached report for `url`, returning it with its age in seconds.
-pub fn load(url: &str) -> Option<(FetchReport, u64)> {
+pub async fn load(url: &str) -> Option<(FetchReport, u64)> {
     let dir = cache_dir()?;
     let path = dir.join(format!("{}.json", cache_key(url)));
-    let bytes = fs::read(&path).ok()?;
+    let bytes = fs::read(&path).await.ok()?;
     let cached: CachedFetch = serde_json::from_slice(&bytes).ok()?;
     let now = now_secs();
     let age = now.saturating_sub(cached.fetched_at);
     if age > CACHE_TTL_SECS {
-        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(&path).await;
         return None;
     }
     Some((cached.report, age))
@@ -70,10 +70,10 @@ pub fn load(url: &str) -> Option<(FetchReport, u64)> {
 /// Store a report for `url`, atomically and with `0600` permissions.
 ///
 /// Returns `None` on any failure; callers ignore it.
-pub fn store(url: &str, report: &FetchReport) -> Option<()> {
+pub async fn store(url: &str, report: &FetchReport) -> Option<()> {
     let dir = cache_dir()?;
-    fs::create_dir_all(&dir).ok()?;
-    sweep(&dir);
+    fs::create_dir_all(&dir).await.ok()?;
+    sweep(&dir).await;
     let cached = CachedFetch {
         fetched_at: now_secs(),
         report: report.clone(),
@@ -81,50 +81,50 @@ pub fn store(url: &str, report: &FetchReport) -> Option<()> {
     let data = serde_json::to_vec(&cached).ok()?;
     let key = cache_key(url);
     let tmp = dir.join(format!(".{key}.tmp"));
-    write_private(&tmp, &data).ok()?;
-    fs::rename(&tmp, dir.join(format!("{key}.json"))).ok()?;
+    write_private(&tmp, &data).await.ok()?;
+    fs::rename(&tmp, dir.join(format!("{key}.json"))).await.ok()?;
     Some(())
 }
 
-fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    let mut file = fs::File::create(path)?;
+async fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let mut file = fs::File::create(path).await?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600)).await?;
     }
-    file.write_all(data)?;
-    file.sync_all()?;
+    file.write_all(data).await?;
+    file.sync_all().await?;
     Ok(())
 }
 
 /// Remove expired entries opportunistically; errors are ignored.
-fn sweep(dir: &Path) {
-    let Ok(entries) = fs::read_dir(dir) else {
+async fn sweep(dir: &Path) {
+    let Ok(mut entries) = fs::read_dir(dir).await else {
         return;
     };
     let now = now_secs();
-    for entry in entries.flatten() {
+    while let Ok(Some(entry)) = entries.next_entry().await {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
         if name.ends_with(".tmp") {
-            let _ = fs::remove_file(&path);
+            let _ = fs::remove_file(&path).await;
             continue;
         }
         if !name.ends_with(".json") {
             continue;
         }
-        let Ok(bytes) = fs::read(&path) else {
+        let Ok(bytes) = fs::read(&path).await else {
             continue;
         };
         let Ok(cached) = serde_json::from_slice::<CachedFetch>(&bytes) else {
-            let _ = fs::remove_file(&path);
+            let _ = fs::remove_file(&path).await;
             continue;
         };
         if now.saturating_sub(cached.fetched_at) > CACHE_TTL_SECS {
-            let _ = fs::remove_file(&path);
+            let _ = fs::remove_file(&path).await;
         }
     }
 }

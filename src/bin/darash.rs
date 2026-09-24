@@ -362,7 +362,7 @@ async fn fetch_report(
     cacheable: bool,
 ) -> Result<FetchReport, String> {
     if cacheable && !args.fresh {
-        if let Some((report, age)) = disk_cache::load(&args.input) {
+        if let Some((report, age)) = disk_cache::load(&args.input).await {
             // A cached body larger than an explicit cap must not satisfy it.
             let within_cap = args
                 .max_bytes
@@ -387,7 +387,7 @@ async fn fetch_report(
         .await
         .map_err(|error| error.to_string())?;
     if cacheable {
-        let _ = disk_cache::store(&args.input, &report);
+        let _ = disk_cache::store(&args.input, &report).await;
     }
     Ok(report)
 }
