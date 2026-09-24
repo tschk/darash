@@ -12,9 +12,9 @@
 //! request bodies, and `Cache-Control: no-store` all bypass it.
 
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::io::AsyncWriteExt;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -70,10 +70,13 @@ pub fn load(url: &str) -> Option<(FetchReport, u64)> {
 /// Store a report for `url`, atomically and with `0600` permissions.
 ///
 /// Returns `None` on any failure; callers ignore it.
-pub fn store(url: &str, report: &FetchReport) -> Option<()> {
+pub async fn store(url: &str, report: &FetchReport) -> Option<()> {
     let dir = cache_dir()?;
-    fs::create_dir_all(&dir).ok()?;
-    sweep(&dir);
+    tokio::fs::create_dir_all(&dir).await.ok()?;
+
+    let dir_clone = dir.clone();
+    tokio::task::spawn_blocking(move || sweep(&dir_clone));
+
     let cached = CachedFetch {
         fetched_at: now_secs(),
         report: report.clone(),
@@ -81,20 +84,23 @@ pub fn store(url: &str, report: &FetchReport) -> Option<()> {
     let data = serde_json::to_vec(&cached).ok()?;
     let key = cache_key(url);
     let tmp = dir.join(format!(".{key}.tmp"));
-    write_private(&tmp, &data).ok()?;
-    fs::rename(&tmp, dir.join(format!("{key}.json"))).ok()?;
+    write_private(&tmp, &data).await.ok()?;
+    tokio::fs::rename(&tmp, dir.join(format!("{key}.json")))
+        .await
+        .ok()?;
     Some(())
 }
 
-fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    let mut file = fs::File::create(path)?;
+async fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let mut file = tokio::fs::File::create(path).await?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .await?;
     }
-    file.write_all(data)?;
-    file.sync_all()?;
+    file.write_all(data).await?;
+    file.sync_all().await?;
     Ok(())
 }
 
