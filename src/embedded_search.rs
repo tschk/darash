@@ -33,7 +33,7 @@ pub(crate) struct SearchOutcome {
 }
 
 impl ProviderFailure {
-    fn new(provider: Provider, error: impl Into<String>) -> Self {
+    fn new(provider: crate::SearchSource, error: impl Into<String>) -> Self {
         Self {
             provider: provider.name(),
             error: error.into(),
@@ -41,27 +41,19 @@ impl ProviderFailure {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Provider {
-    Web,
-    Academic,
-    Discussions,
+trait ProviderExt {
+    fn name(self) -> &'static str;
+    fn from_name(name: &str) -> Option<Self>
+    where
+        Self: Sized;
 }
 
-impl Provider {
+impl ProviderExt for crate::SearchSource {
     fn name(self) -> &'static str {
         match self {
             Self::Web => "duckduckgo",
             Self::Academic => "openalex",
             Self::Discussions => "hacker-news",
-        }
-    }
-
-    fn category(self) -> &'static str {
-        match self {
-            Self::Web => "general",
-            Self::Academic => "science",
-            Self::Discussions => "social media",
         }
     }
 
@@ -163,12 +155,12 @@ pub(crate) async fn search_with_outcome(
     })
 }
 
-fn providers(query: &SearchQuery) -> Vec<Provider> {
+fn providers(query: &SearchQuery) -> Vec<crate::SearchSource> {
     if !query.engines.is_empty() {
-        let selected: Vec<Provider> = query
+        let selected: Vec<crate::SearchSource> = query
             .engines
             .iter()
-            .filter_map(|name| Provider::from_name(name))
+            .filter_map(|name| crate::SearchSource::from_name(name))
             .fold(Vec::new(), |mut selected, provider| {
                 if !selected
                     .iter()
@@ -186,12 +178,12 @@ fn providers(query: &SearchQuery) -> Vec<Provider> {
         }
     }
     let categories = query.categories.as_deref().unwrap_or("general");
-    let mut selected: Vec<Provider> = Vec::new();
+    let mut selected: Vec<crate::SearchSource> = Vec::new();
     for category in categories.split(',').map(str::trim) {
         let provider = match category {
-            "science" => Provider::Academic,
-            "social media" => Provider::Discussions,
-            _ => Provider::Web,
+            "science" => crate::SearchSource::Academic,
+            "social media" => crate::SearchSource::Discussions,
+            _ => crate::SearchSource::Web,
         };
         if !selected
             .iter()
@@ -201,7 +193,7 @@ fn providers(query: &SearchQuery) -> Vec<Provider> {
         }
     }
     if selected.is_empty() {
-        selected.push(Provider::Web);
+        selected.push(crate::SearchSource::Web);
     }
     selected
         .into_iter()
@@ -235,19 +227,19 @@ fn matches_blocklist_result(result: &SearchResult, config: &SearchConfig) -> boo
 
 async fn fetch_provider(
     client: &Client,
-    provider: Provider,
+    provider: crate::SearchSource,
     query: &SearchQuery,
 ) -> Result<Vec<SearchResult>, ProviderFailure> {
     match provider {
-        Provider::Web => fetch_web(client, provider, query).await,
-        Provider::Academic => fetch_openalex(client, provider, query).await,
-        Provider::Discussions => fetch_hacker_news(client, provider, query).await,
+        crate::SearchSource::Web => fetch_web(client, provider, query).await,
+        crate::SearchSource::Academic => fetch_openalex(client, provider, query).await,
+        crate::SearchSource::Discussions => fetch_hacker_news(client, provider, query).await,
     }
 }
 
 async fn fetch_web(
     _client: &Client,
-    provider: Provider,
+    provider: crate::SearchSource,
     query: &SearchQuery,
 ) -> Result<Vec<SearchResult>, ProviderFailure> {
     let params = duckduckgo_params(query).map_err(|error| ProviderFailure::new(provider, error))?;
@@ -266,7 +258,7 @@ async fn fetch_web(
 
 async fn fetch_openalex(
     client: &Client,
-    provider: Provider,
+    provider: crate::SearchSource,
     query: &SearchQuery,
 ) -> Result<Vec<SearchResult>, ProviderFailure> {
     let params = openalex_params(query);
@@ -280,7 +272,7 @@ async fn fetch_openalex(
     Ok(results)
 }
 
-fn parse_openalex(body: &str, provider: Provider) -> Result<Vec<SearchResult>, String> {
+fn parse_openalex(body: &str, provider: crate::SearchSource) -> Result<Vec<SearchResult>, String> {
     let response: OpenAlexResponse =
         serde_json::from_str(body).map_err(|error| error.to_string())?;
     Ok(response
@@ -314,7 +306,7 @@ fn parse_openalex(body: &str, provider: Provider) -> Result<Vec<SearchResult>, S
 
 async fn fetch_hacker_news(
     client: &Client,
-    provider: Provider,
+    provider: crate::SearchSource,
     query: &SearchQuery,
 ) -> Result<Vec<SearchResult>, ProviderFailure> {
     let params =
@@ -329,7 +321,10 @@ async fn fetch_hacker_news(
     Ok(results)
 }
 
-fn parse_hacker_news(body: &str, provider: Provider) -> Result<Vec<SearchResult>, String> {
+fn parse_hacker_news(
+    body: &str,
+    provider: crate::SearchSource,
+) -> Result<Vec<SearchResult>, String> {
     let response: HackerNewsResponse =
         serde_json::from_str(body).map_err(|error| error.to_string())?;
     Ok(response
@@ -521,7 +516,10 @@ fn duckduckgo_time_range(time_range: TimeRange) -> &'static str {
     }
 }
 
-fn parse_duckduckgo(body: &str, provider: Provider) -> Result<Vec<SearchResult>, String> {
+fn parse_duckduckgo(
+    body: &str,
+    provider: crate::SearchSource,
+) -> Result<Vec<SearchResult>, String> {
     let document = Html::parse_document(body);
     let result_selector = Selector::parse("div.result").map_err(|error| error.to_string())?;
     let title_selector = Selector::parse("a.result__a").map_err(|error| error.to_string())?;
@@ -573,7 +571,7 @@ fn safe_url(raw: &str) -> Option<String> {
 }
 
 fn result(
-    provider: Provider,
+    provider: crate::SearchSource,
     title: String,
     url: String,
     snippet: String,
@@ -827,7 +825,7 @@ mod tests {
     #[test]
     fn deduplicates_urls_and_merges_engines() {
         let first = result(
-            Provider::Web,
+            crate::SearchSource::Web,
             "Rust guide".to_owned(),
             "https://example.com/guide#top".to_owned(),
             "guide".to_owned(),
@@ -835,7 +833,7 @@ mod tests {
         )
         .expect("http url");
         let second = result(
-            Provider::Academic,
+            crate::SearchSource::Academic,
             "Rust guide".to_owned(),
             "https://example.com/guide".to_owned(),
             "longer guide".to_owned(),
@@ -864,7 +862,7 @@ mod tests {
     fn parses_duckduckgo_fixture() {
         let results = parse_duckduckgo(
             r#"<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Frust">Rust</a><a class="result__snippet">A language</a></div>"#,
-            Provider::Web,
+            crate::SearchSource::Web,
         )
         .expect("valid fixture");
         assert_eq!(results[0].title, "Rust");
@@ -875,7 +873,7 @@ mod tests {
     #[test]
     fn result_rejects_non_http_urls() {
         assert!(result(
-            Provider::Academic,
+            crate::SearchSource::Academic,
             "bad".to_owned(),
             "javascript:alert(1)".to_owned(),
             "snippet".to_owned(),
@@ -883,7 +881,7 @@ mod tests {
         )
         .is_none());
         assert!(result(
-            Provider::Academic,
+            crate::SearchSource::Academic,
             "file".to_owned(),
             "file:///etc/passwd".to_owned(),
             "snippet".to_owned(),
@@ -908,7 +906,7 @@ mod tests {
     fn parses_openalex_fixture() {
         let results = parse_openalex(
             r#"{"results":[{"title":"Async Rust","doi":"https://doi.org/10.1234/rust","publication_year":2026,"abstract_inverted_index":{"Rust":[1],"async":[0]}}]}"#,
-            Provider::Academic,
+            crate::SearchSource::Academic,
         )
         .expect("valid OpenAlex fixture");
         assert_eq!(results[0].title, "Async Rust");
@@ -920,7 +918,7 @@ mod tests {
     fn parses_hacker_news_fixture_and_sanitizes_html() {
         let results = parse_hacker_news(
             r#"{"hits":[{"story_title":"Rust","story_url":"https://news.ycombinator.com/item?id=1","comment_text":"<p>Fast\u0007 <strong>async</strong></p>"}]}"#,
-            Provider::Discussions,
+            crate::SearchSource::Discussions,
         )
         .expect("valid Hacker News fixture");
         assert_eq!(results[0].title, "Rust");
@@ -981,7 +979,7 @@ mod tests {
     fn dedupe_and_rank_truncates_long_queries_preventing_dos() {
         let long_query = "a".repeat(1000);
         let res = result(
-            Provider::Web,
+            crate::SearchSource::Web,
             "Rust".to_owned(),
             "https://example.com".to_owned(),
             "A language".to_owned(),
@@ -1004,7 +1002,7 @@ mod tests {
             "rust async",
             vec![
                 result(
-                    Provider::Web,
+                    crate::SearchSource::Web,
                     "Rust async guide".to_owned(),
                     "https://example.com/guide".to_owned(),
                     "async Rust futures".to_owned(),
@@ -1012,7 +1010,7 @@ mod tests {
                 )
                 .expect("http url"),
                 result(
-                    Provider::Web,
+                    crate::SearchSource::Web,
                     "The guide".to_owned(),
                     "https://example.com/other".to_owned(),
                     "A guide about programming".to_owned(),

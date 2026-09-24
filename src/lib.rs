@@ -125,7 +125,7 @@ impl SearchSource {
         }
     }
 
-    fn category(self) -> &'static str {
+    pub(crate) fn category(self) -> &'static str {
         match self {
             Self::Web => "general",
             Self::Academic => "science",
