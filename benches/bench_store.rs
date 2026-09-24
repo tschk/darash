@@ -19,7 +19,9 @@ fn bench_store(c: &mut Criterion) {
     let mut group = c.benchmark_group("disk_cache");
     group.bench_function("store()", |b| {
         b.to_async(&rt).iter(|| async {
-            black_box(darash::disk_cache::store("https://example.com/some/test/url", &report).await);
+            black_box(
+                darash::disk_cache::store("https://example.com/some/test/url", &report).await,
+            );
         })
     });
     group.finish();

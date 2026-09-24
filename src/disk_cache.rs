@@ -85,7 +85,9 @@ pub async fn store(url: &str, report: &FetchReport) -> Option<()> {
     let key = cache_key(url);
     let tmp = dir.join(format!(".{key}.tmp"));
     write_private(&tmp, &data).await.ok()?;
-    tokio::fs::rename(&tmp, dir.join(format!("{key}.json"))).await.ok()?;
+    tokio::fs::rename(&tmp, dir.join(format!("{key}.json")))
+        .await
+        .ok()?;
     Some(())
 }
 
@@ -94,7 +96,8 @@ async fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600)).await?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .await?;
     }
     file.write_all(data).await?;
     file.sync_all().await?;
