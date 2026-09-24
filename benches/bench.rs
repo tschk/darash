@@ -1,4 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use darash::fetch;
 use darash::SearchResult;
 
 fn bench_citation(c: &mut Criterion) {
@@ -29,5 +30,28 @@ fn bench_citation(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_citation);
+fn bench_read_source(c: &mut Criterion) {
+    let temp_dir = std::env::temp_dir();
+    let mut temp_path = temp_dir.clone();
+    temp_path.push(format!("darash-bench-test-{}.html", std::process::id()));
+
+    // Create a fairly large file
+    let content = "<h1>Local</h1>\n".repeat(10000);
+    std::fs::write(&temp_path, content).expect("fixture writes");
+
+    let path = temp_path.clone();
+
+    let mut group = c.benchmark_group("read_source");
+    group.bench_function("async", |b| {
+        b.to_async(tokio::runtime::Runtime::new().unwrap())
+            .iter(|| async {
+                black_box(fetch::read_source(&path).await.unwrap());
+            })
+    });
+    group.finish();
+
+    std::fs::remove_file(&temp_path).ok();
+}
+
+criterion_group!(benches, bench_citation, bench_read_source);
 criterion_main!(benches);

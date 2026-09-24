@@ -7,8 +7,6 @@
 
 use std::collections::HashMap;
 
-#[cfg(feature = "client")]
-use std::io::Read;
 use std::time::Duration;
 #[cfg(feature = "client")]
 use std::time::Instant;
@@ -822,12 +820,10 @@ pub fn apply_budget(items: Vec<String>, budget: Option<usize>) -> Budgeted {
 
 /// Read a local file as a fetch report. URLs stay on the network path.
 #[cfg(feature = "client")]
-pub fn read_source(path: impl AsRef<std::path::Path>) -> Result<FetchReport, Error> {
+pub async fn read_source(path: impl AsRef<std::path::Path>) -> Result<FetchReport, Error> {
     let path = path.as_ref();
-    let mut file = std::fs::File::open(path)
-        .map_err(|error| Error::SourceRead(format!("cannot read {}: {error}", path.display())))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
+    let bytes = tokio::fs::read(path)
+        .await
         .map_err(|error| Error::SourceRead(format!("cannot read {}: {error}", path.display())))?;
     if bytes.len() > FETCH_MAX_BODY_BYTES {
         return Err(Error::FetchBodyTooLarge {
@@ -1176,13 +1172,13 @@ mod tests {
         assert_eq!(estimate_tokens("abcde"), 2);
     }
 
-    #[test]
-    fn local_reports_read_files_without_http() {
+    #[tokio::test]
+    async fn local_reports_read_files_without_http() {
         let mut path = std::env::temp_dir();
         path.push(format!("darash-fetch-test-{}.html", std::process::id()));
         std::fs::write(&path, "<h1>Local</h1>").expect("fixture writes");
 
-        let report = read_source(&path).expect("fixture reads");
+        let report = read_source(&path).await.expect("fixture reads");
         assert_eq!(report.status, None);
         assert!(report.ok);
         assert_eq!(report.body, "<h1>Local</h1>");
