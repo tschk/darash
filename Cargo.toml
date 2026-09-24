@@ -40,3 +40,7 @@ required-features = ["client"]
 [[bench]]
 name = "bench"
 harness = false
+
+[[bench]]
+name = "bench_allowlist"
+harness = false
