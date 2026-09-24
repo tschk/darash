@@ -164,20 +164,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
     );
 
-    if args.count && extraction != Extraction::Select {
-        return Err("--count requires --select".to_owned());
-    }
-    if !structured && (args.offset > 0 || args.json_envelope) {
-        return Err(
-            "--offset/--json-envelope apply to --select, --row, --table, or --locate".to_owned(),
-        );
-    }
-    if args.where_.is_some() && !matches!(extraction, Extraction::Row | Extraction::Table) {
-        return Err("--where applies to --row or --table output".to_owned());
-    }
-    if args.output.is_some() && !matches!(extraction, Extraction::Report | Extraction::Body) {
-        return Err("--output/-o applies only to the default report or --body".to_owned());
-    }
+    validate_fetch_args(&args, extraction, structured)?;
 
     let is_url = args.input.starts_with("http://") || args.input.starts_with("https://");
     let method = args.method.clone().unwrap_or_else(|| "GET".to_owned());
@@ -213,57 +200,111 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
             let rendered =
                 serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
             println!("{rendered}");
-            return Ok(fail_code(&args, &report));
+            Ok(fail_code(&args, &report))
         }
         Extraction::Body => {
             eprintln!("darash fetch: {}", report.summary());
             println!("{}", report.body);
-            return Ok(fail_code(&args, &report));
+            Ok(fail_code(&args, &report))
         }
         Extraction::Markdown | Extraction::Text => {
-            let rendered = if extraction == Extraction::Markdown {
-                fetch::to_markdown(&report.body)
-            } else {
-                fetch::to_text(&report.body)
-            };
-            eprintln!("darash fetch: {}", report.summary());
-            emit_document(rendered, &report, args.budget, args.json);
-            return Ok(fail_code(&args, &report));
+            handle_document_extraction(&args, extraction, &report)
         }
-        Extraction::Outline => {
-            let entries = fetch::outline(&report.body);
-            let items = entries
-                .iter()
-                .map(|entry| {
-                    format!(
-                        "{}\t{}\t{}",
-                        entry.selector,
-                        entry.count,
-                        entry.sample.as_deref().unwrap_or_default()
-                    )
-                })
-                .collect::<Vec<_>>();
-            let data = serde_json::to_value(&entries).map_err(|error| error.to_string())?;
-            let (limited, limit_omitted) = cap(items, args.limit.unwrap_or(DEFAULT_FETCH_LIMIT));
-            let budgeted = fetch::apply_budget(limited, args.budget);
-            let omitted = limit_omitted + budgeted.omitted;
-            eprintln!("darash fetch: {}", report.summary());
-            if omitted > 0 {
-                eprintln!(
-                    "darash fetch: {omitted} item(s) omitted; raise --limit/--budget or narrow the selector"
-                );
-            }
-            if args.json {
-                emit_json(data, &report, budgeted.items.len(), omitted);
-            } else {
-                emit_plain(&budgeted.items);
-            }
-            return Ok(fail_code(&args, &report));
+        Extraction::Outline => handle_outline_extraction(&args, &report),
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {
+            handle_structured_extraction(&args, extraction, &report)
         }
-        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {}
     }
+}
 
-    let (records, headers, force_json) = build_records(extraction, &args, &report)?;
+async fn fetch_report(
+    args: &FetchArgs,
+    method: &str,
+    cacheable: bool,
+) -> Result<FetchReport, String> {
+    if cacheable && !args.fresh {
+        if let Some((report, age)) = disk_cache::load(&args.input) {
+            // A cached body larger than an explicit cap must not satisfy it.
+            let within_cap = args
+                .max_bytes
+                .map(|max| report.body.len() <= max)
+                .unwrap_or(true);
+            if within_cap {
+                eprintln!("using {age}s-old cached fetch (--fresh to refetch)");
+                return Ok(report);
+            }
+        }
+    }
+    let options = fetch::FetchOptions {
+        method: Some(method.to_owned()),
+        headers: args.headers.clone(),
+        body: args.data.clone(),
+        basic_auth: args.basic_auth.clone(),
+        insecure: args.insecure,
+        timeout: args.max_time,
+        max_bytes: args.max_bytes,
+    };
+    let report = fetch::fetch_with(&args.input, &options)
+        .await
+        .map_err(|error| error.to_string())?;
+    if cacheable {
+        let _ = disk_cache::store(&args.input, &report);
+    }
+    Ok(report)
+}
+
+fn handle_document_extraction(
+    args: &FetchArgs,
+    extraction: Extraction,
+    report: &FetchReport,
+) -> Result<i32, String> {
+    let rendered = if extraction == Extraction::Markdown {
+        fetch::to_markdown(&report.body)
+    } else {
+        fetch::to_text(&report.body)
+    };
+    eprintln!("darash fetch: {}", report.summary());
+    emit_document(rendered, report, args.budget, args.json);
+    Ok(fail_code(args, report))
+}
+
+fn handle_outline_extraction(args: &FetchArgs, report: &FetchReport) -> Result<i32, String> {
+    let entries = fetch::outline(&report.body);
+    let items = entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}	{}	{}",
+                entry.selector,
+                entry.count,
+                entry.sample.as_deref().unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>();
+    let data = serde_json::to_value(&entries).map_err(|error| error.to_string())?;
+    let (limited, limit_omitted) = cap(items, args.limit.unwrap_or(DEFAULT_FETCH_LIMIT));
+    let budgeted = fetch::apply_budget(limited, args.budget);
+    let omitted = limit_omitted + budgeted.omitted;
+    eprintln!("darash fetch: {}", report.summary());
+    if omitted > 0 {
+        eprintln!(
+            "darash fetch: {omitted} item(s) omitted; raise --limit/--budget or narrow the selector"
+        );
+    }
+    if args.json {
+        emit_json(data, report, budgeted.items.len(), omitted);
+    } else {
+        emit_plain(&budgeted.items);
+    }
+    Ok(fail_code(args, report))
+}
+
+fn handle_structured_extraction(
+    args: &FetchArgs,
+    extraction: Extraction,
+    report: &FetchReport,
+) -> Result<i32, String> {
+    let (records, headers, force_json) = build_records(extraction, args, report)?;
     if extraction == Extraction::Select && args.count {
         let selector = args.select.as_deref().unwrap_or_default();
         if records.is_empty() {
@@ -338,7 +379,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     } else if args.json {
         emit_json(
             data,
-            &report,
+            report,
             meta.returned,
             meta.total.saturating_sub(meta.returned),
         );
@@ -353,43 +394,29 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         }
         emit_plain(&budgeted.items);
     }
-    Ok(fail_code(&args, &report))
+    Ok(fail_code(args, report))
 }
 
-async fn fetch_report(
+fn validate_fetch_args(
     args: &FetchArgs,
-    method: &str,
-    cacheable: bool,
-) -> Result<FetchReport, String> {
-    if cacheable && !args.fresh {
-        if let Some((report, age)) = disk_cache::load(&args.input) {
-            // A cached body larger than an explicit cap must not satisfy it.
-            let within_cap = args
-                .max_bytes
-                .map(|max| report.body.len() <= max)
-                .unwrap_or(true);
-            if within_cap {
-                eprintln!("using {age}s-old cached fetch (--fresh to refetch)");
-                return Ok(report);
-            }
-        }
+    extraction: Extraction,
+    structured: bool,
+) -> Result<(), String> {
+    if args.count && extraction != Extraction::Select {
+        return Err("--count requires --select".to_owned());
     }
-    let options = fetch::FetchOptions {
-        method: Some(method.to_owned()),
-        headers: args.headers.clone(),
-        body: args.data.clone(),
-        basic_auth: args.basic_auth.clone(),
-        insecure: args.insecure,
-        timeout: args.max_time,
-        max_bytes: args.max_bytes,
-    };
-    let report = fetch::fetch_with(&args.input, &options)
-        .await
-        .map_err(|error| error.to_string())?;
-    if cacheable {
-        let _ = disk_cache::store(&args.input, &report);
+    if !structured && (args.offset > 0 || args.json_envelope) {
+        return Err(
+            "--offset/--json-envelope apply to --select, --row, --table, or --locate".to_owned(),
+        );
     }
-    Ok(report)
+    if args.where_.is_some() && !matches!(extraction, Extraction::Row | Extraction::Table) {
+        return Err("--where applies to --row or --table output".to_owned());
+    }
+    if args.output.is_some() && !matches!(extraction, Extraction::Report | Extraction::Body) {
+        return Err("--output/-o applies only to the default report or --body".to_owned());
+    }
+    Ok(())
 }
 
 fn build_records(
