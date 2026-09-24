@@ -1033,12 +1033,29 @@ fn parse_source(value: &str) -> Result<SearchSource, String> {
     }
 }
 
+fn escape_control_characters(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_control() && c != '\n' && c != '\r' && c != '\t' {
+            out.extend(c.escape_default());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn print_response(response: &SearchResponse) {
+    let mut stdout = std::io::stdout().lock();
     if let Some(answer) = &response.answer {
-        println!("{answer}\n");
+        let _ = writeln!(stdout, "{}\n", escape_control_characters(answer));
     }
     for source in response.cited_sources() {
-        println!("{source}\n");
+        let _ = writeln!(
+            stdout,
+            "{}\n",
+            escape_control_characters(&source.to_string())
+        );
     }
 }
 
