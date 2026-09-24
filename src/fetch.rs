@@ -1132,12 +1132,52 @@ mod tests {
     }
 
     #[test]
-    fn row_spec_rejects_malformed_fields() {
+    fn test_parse_row_spec() {
+        // Valid cases
+        assert_eq!(
+            parse_row_spec("title=h2").unwrap(),
+            vec![("title".to_owned(), "h2".to_owned())]
+        );
+        assert_eq!(
+            parse_row_spec("title=h2, url=a@href").unwrap(),
+            vec![
+                ("title".to_owned(), "h2".to_owned()),
+                ("url".to_owned(), "a@href".to_owned())
+            ]
+        );
+        // Spaces and trailing commas
+        assert_eq!(
+            parse_row_spec("  title  =  h2  ,  ").unwrap(),
+            vec![("title".to_owned(), "h2".to_owned())]
+        );
+        // Multiple commas
+        assert_eq!(
+            parse_row_spec("title=h2,,,url=a@href").unwrap(),
+            vec![
+                ("title".to_owned(), "h2".to_owned()),
+                ("url".to_owned(), "a@href".to_owned())
+            ]
+        );
+
+        // Invalid cases
         let error = parse_row_spec("title").expect_err("missing = is rejected");
         assert!(error.to_string().contains("missing '='"));
 
         let error = parse_row_spec("").expect_err("empty spec is rejected");
         assert!(error.to_string().contains("empty"));
+
+        let error = parse_row_spec(",,,").expect_err("only commas is rejected");
+        assert!(error.to_string().contains("empty"));
+
+        let error = parse_row_spec("=h2").expect_err("empty name is rejected");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
+
+        let error = parse_row_spec("title=").expect_err("empty selector is rejected");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
     }
 
     #[test]
