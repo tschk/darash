@@ -594,6 +594,11 @@ impl SearchClient {
         if query.page() == Some(0) {
             return Err(Error::InvalidPage);
         }
+        if let Some(safe_search) = query.safe_search() {
+            if SafeSearch::from_level(safe_search).is_none() {
+                return Err(Error::InvalidSafeSearch);
+            }
+        }
         let url = websurfx::build_search_url(self.config.endpoint(), query)
             .map_err(|error| Error::InvalidEndpoint(error.to_string()))?;
         let response = self.http.get(url).send().await.map_err(Error::Request)?;
@@ -888,6 +893,8 @@ pub enum Error {
     QueryTooLong,
     #[error("page must be at least 1")]
     InvalidPage,
+    #[error("safe search level must be between 0 and 4")]
+    InvalidSafeSearch,
     #[error("page is too large for the provider offset")]
     PageOverflow,
     #[cfg(feature = "client")]
