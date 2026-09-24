@@ -292,7 +292,10 @@ mod tests {
         assert_eq!(result.url, "https://example.com");
         assert_eq!(result.content, "Test Description");
         assert_eq!(result.engine, Some("Engine1".to_string()));
-        assert_eq!(result.engines, vec!["Engine1".to_string(), "Engine2".to_string()]);
+        assert_eq!(
+            result.engines,
+            vec!["Engine1".to_string(), "Engine2".to_string()]
+        );
         assert_eq!(result.category, None);
         assert_eq!(result.published_date, None);
         // Use an epsilon comparison or direct check since 0.9 can be precisely represented or close
