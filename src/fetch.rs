@@ -1081,6 +1081,76 @@ mod tests {
     }
 
     #[test]
+    fn to_markdown_exact_output() {
+        // Headings and paragraphs
+        assert_eq!(
+            to_markdown("<h1>Heading 1</h1><p>Paragraph text.</p><h2>Heading 2</h2>"),
+            "# Heading 1\n\nParagraph text.\n\n## Heading 2\n"
+        );
+
+        // Bold and italics
+        assert_eq!(
+            to_markdown("<p>This is <strong>bold</strong> and <em>italic</em>.</p>"),
+            "This is **bold** and *italic*.\n"
+        );
+        assert_eq!(
+            to_markdown("<p>This is <b>bold</b> and <i>italic</i>.</p>"),
+            "This is **bold** and *italic*.\n"
+        );
+
+        // Links
+        assert_eq!(
+            to_markdown("<a href=\"https://example.com\">Example</a>"),
+            "[Example](https://example.com)\n"
+        );
+        assert_eq!(
+            to_markdown("<a href=\"https://example.com\"></a>"),
+            "[https://example.com](https://example.com)\n"
+        );
+
+        // Code and Preformatted text
+        assert_eq!(
+            to_markdown("<p>Use <code>cargo run</code></p>"),
+            "Use `cargo run`\n"
+        );
+        assert_eq!(
+            to_markdown("<pre>fn main() {\n    println!(\"Hello\");\n}</pre>"),
+            "```\nfn main() {\n    println!(\"Hello\");\n}\n```\n"
+        );
+
+        // Lists
+        assert_eq!(
+            to_markdown("<ul><li>Item 1</li><li>Item 2</li></ul>"),
+            "- Item 1\n- Item 2\n"
+        );
+        assert_eq!(
+            to_markdown("<ol><li>First</li><li>Second</li></ol>"),
+            "1. First\n2. Second\n"
+        );
+
+        // Blockquotes
+        assert_eq!(
+            to_markdown("<blockquote><p>To be</p><p>or not to be</p></blockquote>"),
+            "> To be\n> \n> or not to be\n"
+        );
+
+        // Horizontal rules
+        assert_eq!(to_markdown("<hr>"), "---\n");
+
+        // Ignored elements
+        assert_eq!(
+            to_markdown("<script>alert(1);</script><style>body{}</style><p>Visible</p>"),
+            "Visible\n"
+        );
+
+        // Whitespace collapsing
+        assert_eq!(
+            to_markdown("<p>   Multiple    spaces\nand newlines   </p>"),
+            "Multiple spaces and newlines\n"
+        );
+    }
+
+    #[test]
     fn plain_mode_strips_markup() {
         let text = to_text("<h1>Hi</h1><p>See <a href=\"/x\">this</a> and <b>bold</b>.</p>");
         assert_eq!(text, "Hi\n\nSee this and bold.\n");
