@@ -860,50 +860,6 @@ pub struct LocateHit {
 /// owns the attribute. Selector paths use `tag#id` when an id exists, else
 /// `tag.class1.class2`, with CSS identifiers escaped so names like
 /// `sm:w-1/2` round-trip.
-fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
-    let needle_len = needle.len();
-    if needle_len == 0 {
-        return true;
-    }
-    if haystack.len() < needle_len {
-        return false;
-    }
-    if haystack.is_ascii() && needle.is_ascii() {
-        let needle_bytes = needle.as_bytes();
-        let haystack_bytes = haystack.as_bytes();
-        for i in 0..=(haystack_bytes.len() - needle_len) {
-            let mut matches = true;
-            for j in 0..needle_len {
-                if haystack_bytes[i + j].to_ascii_lowercase() != needle_bytes[j] {
-                    matches = false;
-                    break;
-                }
-            }
-            if matches {
-                return true;
-            }
-        }
-        return false;
-    }
-    let mut haystack_chars = haystack.chars();
-    while haystack_chars.clone().next().is_some() {
-        let mut h_iter = haystack_chars.clone().flat_map(char::to_lowercase);
-        let n_iter = needle.chars();
-        let mut match_found = true;
-        for n in n_iter {
-            if h_iter.next() != Some(n) {
-                match_found = false;
-                break;
-            }
-        }
-        if match_found {
-            return true;
-        }
-        haystack_chars.next();
-    }
-    false
-}
-
 pub fn locate(html: &str, needle: &str) -> Vec<LocateHit> {
     let document = scraper::Html::parse_document(html);
     let needle = needle.to_lowercase();
@@ -932,17 +888,20 @@ fn visit_locate(
 
     let mut attr_hit = None;
     for (name, attr_value) in value.attrs() {
-        if contains_ignore_case(attr_value, needle) {
+        if attr_value.to_lowercase().contains(needle) {
             attr_hit = Some((name.to_owned(), attr_value.to_owned()));
             break;
         }
     }
     let child_hit = element.child_elements().any(|child| {
-        let text = child.text().collect::<String>();
-        contains_ignore_case(&text, needle)
+        child
+            .text()
+            .collect::<String>()
+            .to_lowercase()
+            .contains(needle)
     });
     let text = element.text().collect::<String>();
-    let text_hit = !child_hit && contains_ignore_case(&text, needle);
+    let text_hit = !child_hit && text.to_lowercase().contains(needle);
 
     path.push(PathPart { tag, id, classes });
     if let Some((name, attr_value)) = attr_hit {
