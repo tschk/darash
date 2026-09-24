@@ -387,7 +387,7 @@ async fn fetch_report(
         .await
         .map_err(|error| error.to_string())?;
     if cacheable {
-        let _ = disk_cache::store(&args.input, &report);
+        let _ = disk_cache::store(&args.input, &report).await;
     }
     Ok(report)
 }

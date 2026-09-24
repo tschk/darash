@@ -30,7 +30,7 @@ client = ["dep:reqwest", "dep:native-tls", "dep:futures-util", "dep:tokio"]
 search = ["client"]
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = { version = "0.5", features = ["async_tokio"] }
 
 [[bin]]
 name = "darash"
@@ -39,4 +39,8 @@ required-features = ["client"]
 
 [[bench]]
 name = "bench"
+harness = false
+
+[[bench]]
+name = "bench_store"
 harness = false
