@@ -1087,6 +1087,28 @@ mod tests {
     }
 
     #[test]
+    fn plain_mode_strips_block_markdown_formatting() {
+        let text = to_text("<h1>Heading</h1><pre><code>let x = 1;</code></pre><hr>");
+        assert_eq!(text, "Heading\n\nlet x = 1;\n");
+    }
+
+    #[test]
+    fn plain_mode_strips_inline_markdown_formatting() {
+        let text = to_text("<p><b>bold</b> <i>italic</i> <code>code</code> <img src=\"img.png\" alt=\"image\"> <a href=\"/link\">link</a></p>");
+        assert_eq!(text, "bold italic code  link\n");
+    }
+
+    #[test]
+    fn plain_mode_preserves_structural_markers() {
+        let text = to_text("<ul><li>One</li></ul><ol><li>Two</li></ol><blockquote>Quote</blockquote><table><tr><th>Header</th></tr><tr><td>Data</td></tr></table>");
+        assert!(text.contains("- One"));
+        assert!(text.contains("1. Two"));
+        assert!(text.contains("> Quote"));
+        assert!(text.contains("| Header |"));
+        assert!(text.contains("| Data |"));
+    }
+
+    #[test]
     fn markdown_links_use_href_labels_when_empty() {
         let markdown = to_markdown("<p><a href=\"/go\"></a></p>");
         assert!(markdown.contains("[/go](/go)"));
