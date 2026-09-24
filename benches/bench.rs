@@ -29,5 +29,31 @@ fn bench_citation(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_citation);
+fn bench_disk_cache(c: &mut Criterion) {
+    let report = darash::fetch::FetchReport {
+        status: Some(200),
+        ok: true,
+        url: "https://example.com/some/long/url/that/takes/time/to/clone".to_string(),
+        redirected: false,
+        ms: 100,
+        content_type: Some("text/html".to_string()),
+        bytes: 1000,
+        body: "Some long content that takes a bit of time to clone, like this sentence, but much longer. It goes on and on and on and on and on and on and on and on and on and on and on and on.".repeat(100).to_string(),
+    };
+
+    let mut group = c.benchmark_group("disk_cache");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
+    group.bench_function("store", |b| {
+        b.to_async(&rt).iter(|| async {
+            let _ = darash::disk_cache::store(
+                "https://example.com/some/long/url/that/takes/time/to/clone",
+                &report,
+            ).await;
+        })
+    });
+    group.finish();
+}
+
+criterion_group!(benches, bench_citation, bench_disk_cache);
 criterion_main!(benches);
