@@ -277,6 +277,51 @@ mod tests {
     }
 
     #[test]
+    fn converts_to_search_result_with_multiple_engines() {
+        let websurfx_result = WebsurfxSearchResult {
+            title: "Test Title".to_string(),
+            url: "https://example.com".to_string(),
+            description: "Test Description".to_string(),
+            engine: vec!["Engine1".to_string(), "Engine2".to_string()],
+            relevance_score: 0.9,
+        };
+
+        let result = websurfx_result.into_search_result();
+
+        assert_eq!(result.title, "Test Title");
+        assert_eq!(result.url, "https://example.com");
+        assert_eq!(result.content, "Test Description");
+        assert_eq!(result.engine, Some("Engine1".to_string()));
+        assert_eq!(result.engines, vec!["Engine1".to_string(), "Engine2".to_string()]);
+        assert_eq!(result.category, None);
+        assert_eq!(result.published_date, None);
+        // Use an epsilon comparison or direct check since 0.9 can be precisely represented or close
+        assert_eq!(result.score, Some(0.9_f32 as f64));
+    }
+
+    #[test]
+    fn converts_to_search_result_with_empty_engines() {
+        let websurfx_result = WebsurfxSearchResult {
+            title: "Test Title".to_string(),
+            url: "https://example.com".to_string(),
+            description: "Test Description".to_string(),
+            engine: vec![],
+            relevance_score: 0.5,
+        };
+
+        let result = websurfx_result.into_search_result();
+
+        assert_eq!(result.title, "Test Title");
+        assert_eq!(result.url, "https://example.com");
+        assert_eq!(result.content, "Test Description");
+        assert_eq!(result.engine, None);
+        assert!(result.engines.is_empty());
+        assert_eq!(result.category, None);
+        assert_eq!(result.published_date, None);
+        assert_eq!(result.score, Some(0.5_f32 as f64));
+    }
+
+    #[test]
     fn gets_websurfx_query_properties() {
         let query = WebsurfxQuery::new("test query");
         assert_eq!(query.query(), "test query");
