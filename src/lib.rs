@@ -594,6 +594,9 @@ impl SearchClient {
         if query.page() == Some(0) {
             return Err(Error::InvalidPage);
         }
+        if query.safe_search().unwrap_or_default() > 4 {
+            return Err(Error::InvalidSafeSearch);
+        }
         let url = websurfx::build_search_url(self.config.endpoint(), query)
             .map_err(|error| Error::InvalidEndpoint(error.to_string()))?;
         let response = self.http.get(url).send().await.map_err(Error::Request)?;
@@ -890,6 +893,8 @@ pub enum Error {
     InvalidPage,
     #[error("page is too large for the provider offset")]
     PageOverflow,
+    #[error("safe search level must be between 0 and 4")]
+    InvalidSafeSearch,
     #[cfg(feature = "client")]
     #[error("failed to build HTTP client: {0}")]
     ClientBuild(#[source] reqwest::Error),
@@ -1366,6 +1371,14 @@ mod tests {
         assert!(
             matches!(error, Error::HttpStatus { status, body } if status == StatusCode::BAD_GATEWAY && body == "upstream bad")
         );
+    }
+
+    #[tokio::test]
+    async fn search_websurfx_rejects_invalid_safe_search() {
+        let client = SearchClient::new("https://example.com/search").expect("valid endpoint");
+        let query = WebsurfxQuery::new("test").with_safe_search(5);
+        let error = client.search_websurfx(&query).await.expect_err("should reject safe_search > 4");
+        assert!(matches!(error, Error::InvalidSafeSearch));
     }
 
     #[tokio::test]
