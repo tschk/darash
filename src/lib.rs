@@ -1377,7 +1377,10 @@ mod tests {
     async fn search_websurfx_rejects_invalid_safe_search() {
         let client = SearchClient::new("https://example.com/search").expect("valid endpoint");
         let query = WebsurfxQuery::new("test").with_safe_search(5);
-        let error = client.search_websurfx(&query).await.expect_err("should reject safe_search > 4");
+        let error = client
+            .search_websurfx(&query)
+            .await
+            .expect_err("should reject safe_search > 4");
         assert!(matches!(error, Error::InvalidSafeSearch));
     }
 
