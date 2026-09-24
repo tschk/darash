@@ -49,7 +49,8 @@ fn bench_disk_cache(c: &mut Criterion) {
             let _ = darash::disk_cache::store(
                 "https://example.com/some/long/url/that/takes/time/to/clone",
                 &report,
-            ).await;
+            )
+            .await;
         })
     });
     group.finish();
