@@ -893,15 +893,11 @@ fn visit_locate(
             break;
         }
     }
-    let child_hit = element.child_elements().any(|child| {
-        child
-            .text()
-            .collect::<String>()
-            .to_lowercase()
-            .contains(needle)
-    });
+    let child_hit = element
+        .child_elements()
+        .any(|child| text_contains(child.text(), needle));
     let text = element.text().collect::<String>();
-    let text_hit = !child_hit && text.to_lowercase().contains(needle);
+    let text_hit = !child_hit && text_contains(element.text(), needle);
 
     path.push(PathPart { tag, id, classes });
     if let Some((name, attr_value)) = attr_hit {
@@ -924,6 +920,16 @@ fn visit_locate(
         visit_locate(child, path, needle, hits);
     }
     path.pop();
+}
+
+fn text_contains<'a>(text_iter: impl Iterator<Item = &'a str>, needle: &str) -> bool {
+    let mut s = text_iter.collect::<String>();
+    if s.is_ascii() {
+        s.make_ascii_lowercase();
+        s.contains(needle)
+    } else {
+        s.to_lowercase().contains(needle)
+    }
 }
 
 fn selector_path(path: &[PathPart]) -> String {
