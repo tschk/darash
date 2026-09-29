@@ -125,11 +125,28 @@ impl SearchSource {
         }
     }
 
-    fn category(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Web => "duckduckgo",
+            Self::Academic => "openalex",
+            Self::Discussions => "hacker-news",
+        }
+    }
+
+    pub(crate) fn category(self) -> &'static str {
         match self {
             Self::Web => "general",
             Self::Academic => "science",
             Self::Discussions => "social media",
+        }
+    }
+
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "duckduckgo" | "ddg" | "web" => Some(Self::Web),
+            "openalex" | "academic" | "science" => Some(Self::Academic),
+            "hacker-news" | "hackernews" | "hn" | "discussions" => Some(Self::Discussions),
+            _ => None,
         }
     }
 }
