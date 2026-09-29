@@ -107,7 +107,7 @@ pub enum SearchMode {
     Quality,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, Ord, PartialOrd)]
 #[serde(rename_all = "lowercase")]
 pub enum SearchSource {
     #[default]
@@ -125,11 +125,28 @@ impl SearchSource {
         }
     }
 
-    fn category(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Web => "duckduckgo",
+            Self::Academic => "openalex",
+            Self::Discussions => "hacker-news",
+        }
+    }
+
+    pub(crate) fn category(self) -> &'static str {
         match self {
             Self::Web => "general",
             Self::Academic => "science",
             Self::Discussions => "social media",
+        }
+    }
+
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "duckduckgo" | "ddg" | "web" => Some(Self::Web),
+            "openalex" | "academic" | "science" => Some(Self::Academic),
+            "hacker-news" | "hackernews" | "hn" | "discussions" => Some(Self::Discussions),
+            _ => None,
         }
     }
 }
@@ -224,12 +241,9 @@ impl SearchRequest {
     where
         I: IntoIterator<Item = SearchSource>,
     {
-        let mut selected = Vec::new();
-        for source in sources {
-            if !selected.contains(&source) {
-                selected.push(source);
-            }
-        }
+        let mut selected: Vec<_> = sources.into_iter().collect();
+        selected.sort_unstable();
+        selected.dedup();
         self.sources = if selected.is_empty() {
             vec![SearchSource::default()]
         } else {
@@ -428,7 +442,15 @@ impl SearchConfig {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.blocklist = terms.into_iter().map(Into::into).collect();
+        self.blocklist = terms
+            .into_iter()
+            .map(Into::into)
+            .filter(|term| !term.trim().is_empty())
+            .map(|mut term| {
+                term.make_ascii_lowercase();
+                term
+            })
+            .collect();
         self
     }
 
@@ -437,7 +459,15 @@ impl SearchConfig {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.allowlist = terms.into_iter().map(Into::into).collect();
+        self.allowlist = terms
+            .into_iter()
+            .map(Into::into)
+            .filter(|term| !term.trim().is_empty())
+            .map(|mut term| {
+                term.make_ascii_lowercase();
+                term
+            })
+            .collect();
         self
     }
 
@@ -593,6 +623,11 @@ impl SearchClient {
         }
         if query.page() == Some(0) {
             return Err(Error::InvalidPage);
+        }
+        if let Some(safe_search) = query.safe_search() {
+            if SafeSearch::from_level(safe_search).is_none() {
+                return Err(Error::InvalidSafeSearch);
+            }
         }
         let url = websurfx::build_search_url(self.config.endpoint(), query)
             .map_err(|error| Error::InvalidEndpoint(error.to_string()))?;
@@ -888,6 +923,8 @@ pub enum Error {
     QueryTooLong,
     #[error("page must be at least 1")]
     InvalidPage,
+    #[error("safe search level must be between 0 and 4")]
+    InvalidSafeSearch,
     #[error("page is too large for the provider offset")]
     PageOverflow,
     #[cfg(feature = "client")]

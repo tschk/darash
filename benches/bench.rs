@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use darash::fetch;
-use darash::SearchResult;
+use darash::{SearchRequest, SearchResult, SearchSource};
 
 fn bench_citation(c: &mut Criterion) {
     let result = SearchResult {
@@ -30,6 +30,37 @@ fn bench_citation(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_with_sources(c: &mut Criterion) {
+    let mut group = c.benchmark_group("with_sources");
+    group.bench_function("duplicate_sources", |b| {
+        b.iter(|| {
+            let req = SearchRequest::new("rust");
+            let sources = vec![
+                SearchSource::Web,
+                SearchSource::Academic,
+                SearchSource::Discussions,
+                SearchSource::Web,
+                SearchSource::Academic,
+                SearchSource::Web,
+            ];
+            black_box(req.with_sources(sources));
+        })
+    });
+    group.bench_function("many_sources", |b| {
+        b.iter(|| {
+            let req = SearchRequest::new("rust");
+            let mut sources = Vec::new();
+            for _ in 0..100 {
+                sources.push(SearchSource::Web);
+                sources.push(SearchSource::Academic);
+                sources.push(SearchSource::Discussions);
+            }
+            black_box(req.with_sources(sources));
+        })
+    });
+    group.finish();
+}
+
 fn bench_read_source(c: &mut Criterion) {
     let temp_dir = std::env::temp_dir();
     let mut temp_path = temp_dir.clone();
@@ -53,5 +84,10 @@ fn bench_read_source(c: &mut Criterion) {
     std::fs::remove_file(&temp_path).ok();
 }
 
-criterion_group!(benches, bench_citation, bench_read_source);
+criterion_group!(
+    benches,
+    bench_citation,
+    bench_with_sources,
+    bench_read_source
+);
 criterion_main!(benches);
