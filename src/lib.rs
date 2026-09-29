@@ -14,6 +14,7 @@ mod cache;
 mod embedded_search;
 mod websurfx;
 
+#[cfg(feature = "client")]
 pub mod disk_cache;
 pub mod fetch;
 pub mod filter;
