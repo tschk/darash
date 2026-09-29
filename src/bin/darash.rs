@@ -198,7 +198,9 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     let report = if is_url {
         fetch_report(&args, &method, cacheable).await?
     } else {
-        fetch::read_source(&args.input).map_err(|error| error.to_string())?
+        fetch::read_source(&args.input)
+            .await
+            .map_err(|error| error.to_string())?
     };
 
     if let Some(path) = &args.output {
