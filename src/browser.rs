@@ -339,6 +339,42 @@ mod tests {
         )
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cleanup_retains_group_after_leader_exit() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("sleep 30 & exit 0")
+            .process_group(0)
+            .kill_on_drop(true);
+        let child = command.spawn().unwrap();
+        let group = child.id().unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let profile_path = profile.path().to_owned();
+        let mut process = BrowserProcess {
+            child: Some(child),
+            process_group: Some(group),
+            profile: Some(profile),
+            _sink: TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        };
+        process.child.as_mut().unwrap().wait().await.unwrap();
+        assert!(
+            process.child.as_ref().unwrap().id().is_none(),
+            "leader should be reaped"
+        );
+        process.close().await;
+        assert!(!profile_path.exists());
+        for _ in 0..100 {
+            // SAFETY: signal 0 only checks existence of this owned process group.
+            if unsafe { libc::kill(-(group as i32), 0) } == -1 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("descendant survived cleanup of exited leader");
+    }
+
     #[tokio::test]
     #[ignore = "requires explicit installed Chromium; run with DARASH_TEST_BROWSER and --ignored"]
     async fn chromium_js_static_path_status_redirects_and_extraction() {
@@ -536,6 +572,9 @@ fn is_public(ip: IpAddr) -> bool {
 
 struct BrowserProcess {
     child: Option<Child>,
+    // Child::try_wait clears Child::id after the leader exits; retain the group
+    // ID so surviving Chromium descendants can still be terminated.
+    process_group: Option<u32>,
     profile: Option<tempfile::TempDir>,
     // Own the sink port so it can never reach an unrelated local proxy/service.
     _sink: TcpListener,
@@ -596,8 +635,10 @@ impl BrowserProcess {
             .kill_on_drop(true)
             .spawn()
             .map_err(|error| BrowserError::Executable(error.to_string()))?;
+        let process_group = child.id();
         Ok(Self {
             child: Some(child),
+            process_group,
             profile: Some(profile),
             _sink: sink,
         })
@@ -638,8 +679,8 @@ impl BrowserProcess {
     }
 
     async fn close(&mut self) {
+        kill_process_group(self.process_group.take());
         if let Some(child) = self.child.as_mut() {
-            kill_process_group(child);
             let _ = child.kill().await;
             let _ = child.wait().await;
         }
@@ -650,8 +691,8 @@ impl BrowserProcess {
 
 impl Drop for BrowserProcess {
     fn drop(&mut self) {
+        kill_process_group(self.process_group.take());
         if let Some(mut child) = self.child.take() {
-            kill_process_group(&child);
             let _ = child.start_kill();
             let profile = self.profile.take();
             // Keep the profile until Chromium has exited, including cancellation.
@@ -665,9 +706,9 @@ impl Drop for BrowserProcess {
     }
 }
 
-fn kill_process_group(child: &Child) {
+fn kill_process_group(process_group: Option<u32>) {
     #[cfg(unix)]
-    if let Some(pid) = child.id() {
+    if let Some(pid) = process_group {
         // SAFETY: launch creates a new process group whose ID is the owned child
         // PID. A negative PID targets that group, never the caller's process group.
         unsafe {
@@ -675,7 +716,7 @@ fn kill_process_group(child: &Child) {
         }
     }
     #[cfg(not(unix))]
-    let _ = child;
+    let _ = process_group;
 }
 
 struct Bridge<'a> {
