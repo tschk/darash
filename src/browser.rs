@@ -185,365 +185,6 @@ impl NetworkPolicy {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    #[test]
-    fn public_address_policy_rejects_special_use_and_mapped_addresses() {
-        for ip in [
-            "127.0.0.1",
-            "0.0.0.0",
-            "10.0.0.1",
-            "172.16.0.1",
-            "192.168.1.1",
-            "169.254.169.254",
-            "100.64.0.1",
-            "192.0.0.1",
-            "192.0.2.1",
-            "198.18.0.1",
-            "198.51.100.1",
-            "203.0.113.1",
-            "224.0.0.1",
-            "255.255.255.255",
-            "::",
-            "::1",
-            "fc00::1",
-            "fe80::1",
-            "ff02::1",
-            "::ffff:8.8.8.8",
-            "2001:db8::1",
-            "2001::1",
-            "2002:7f00:1::",
-            "3fff::1",
-        ] {
-            assert!(!is_public(ip.parse().unwrap()), "accepted {ip}");
-        }
-        for ip in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
-            assert!(is_public(ip.parse().unwrap()), "rejected {ip}");
-        }
-    }
-
-    #[tokio::test]
-    async fn policy_rejects_credentials_schemes_and_numeric_loopback_before_launch() {
-        let options = BrowserOptions::new("/missing-browser");
-        for url in [
-            "file:///etc/passwd",
-            "ftp://example.test",
-            "data:text/html,hello",
-            "http://user:password@example.test",
-            "http://127.0.0.1",
-            "http://2130706433",
-            "http://[::1]",
-        ] {
-            assert!(
-                matches!(
-                    fetch_rendered(url, &options).await,
-                    Err(BrowserError::Policy(_))
-                ),
-                "accepted {url}"
-            );
-        }
-        let mut options = options;
-        options.timeout = Duration::ZERO;
-        assert!(matches!(
-            fetch_rendered("https://8.8.8.8", &options).await,
-            Err(BrowserError::Options(_))
-        ));
-    }
-
-    struct Fixture {
-        address: SocketAddr,
-        requests: Arc<Mutex<Vec<String>>>,
-        task: tokio::task::JoinHandle<()>,
-    }
-
-    impl Fixture {
-        async fn start() -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let address = listener.local_addr().unwrap();
-            let requests = Arc::new(Mutex::new(Vec::new()));
-            let captured = requests.clone();
-            let task = tokio::spawn(async move {
-                while let Ok((mut socket, _)) = listener.accept().await {
-                    let captured = captured.clone();
-                    tokio::spawn(async move {
-                        let mut buffer = vec![0; 16384];
-                        let length = socket.read(&mut buffer).await.unwrap_or(0);
-                        let request = String::from_utf8_lossy(&buffer[..length]).into_owned();
-                        let path = request.split_whitespace().nth(1).unwrap_or("/").to_owned();
-                        captured.lock().unwrap().push(request);
-                        let (status, headers, body) = match path.as_str() {
-                            "/" => (200, "Content-Type: text/html\r\n".into(), include_str!("../tests/fixtures/rendered.html").to_owned()),
-                            "/app.js" => (200, "Content-Type: text/javascript\r\n".into(), include_str!("../tests/fixtures/app.js").to_owned()),
-                            "/404" => (404, "Content-Type: text/html\r\n".into(), "<main>Missing page</main>".into()),
-                            "/redirect" => (302, "Location: /\r\n".into(), String::new()),
-                            "/loop" => (302, "Location: /loop\r\n".into(), String::new()),
-                            "/private" => (302, format!("Location: http://127.0.0.1:{}/secret\r\n", address.port()), String::new()),
-                            "/subresource" => (200, "Content-Type: text/html\r\n".into(), format!("<main>Hello</main><script src='http://127.0.0.1:{}/secret'></script>", address.port())),
-                            "/big" => (200, "Content-Type: text/html\r\n".into(), "x".repeat(4096)),
-                            "/grow" => (200, "Content-Type: text/html\r\n".into(), "<script>document.write('<main>'+'x'.repeat(4096)+'</main>')</script>".into()),
-                            "/tamper" => (200, "Content-Type: text/html\r\n".into(), "<script>TextEncoder=class {encode(){return []}}; document.write('<main>'+'x'.repeat(4096)+'</main>')</script>".into()),
-                            "/slow" => { tokio::time::sleep(Duration::from_secs(3)).await; (200, String::new(), "Slow".into()) },
-                            "/download" => (200, "Content-Disposition: attachment; filename=download.html\r\n".into(), "<main>Download</main>".into()),
-                            "/auth" => (200, "Content-Type: text/html\r\nSet-Cookie: secret=value\r\n".into(), "<script>fetch('/auth-hop',{headers:{Authorization:'secret'}}).then(()=>document.body.innerHTML='<main id=ready>Done</main>')</script>".into()),
-                            "/auth-hop" => (302, format!("Location: http://other.fixture.test:{}/capture\r\n", address.port()), String::new()),
-                            "/unsupported" => (200, "Content-Type: text/html\r\n".into(), format!("<script>new WebSocket('ws://127.0.0.1:{0}/secret'); new Worker('/worker.js'); navigator.serviceWorker.register('/sw.js').catch(()=>{{}}); window.open('http://127.0.0.1:{0}/secret'); setTimeout(()=>document.body.innerHTML='<main id=ready>Done</main>',300)</script>", address.port())),
-                            "/worker.js" | "/sw.js" => (200, "Content-Type: text/javascript\r\n".into(), format!("fetch('http://127.0.0.1:{}/secret')", address.port())),
-                            "/capture" => (200, "Access-Control-Allow-Origin: *\r\nContent-Type: text/plain\r\n".into(), "Captured".into()),
-                            _ => (200, "Content-Type: text/html\r\n".into(), "<main>Fixture</main>".into()),
-                        };
-                        let response = format!("HTTP/1.1 {status} Fixture\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
-                        let _ = socket.write_all(response.as_bytes()).await;
-                    });
-                }
-            });
-            Self {
-                address,
-                requests,
-                task,
-            }
-        }
-
-        fn url(&self, path: &str) -> String {
-            format!("http://fixture.test:{}{path}", self.address.port())
-        }
-
-        async fn fetch(
-            &self,
-            path: &str,
-            options: &BrowserOptions,
-        ) -> Result<FetchReport, BrowserError> {
-            let policy = NetworkPolicy {
-                fixtures: vec![
-                    ("fixture.test".into(), self.address),
-                    ("other.fixture.test".into(), self.address),
-                ],
-            };
-            fetch_with_policy(&self.url(path), options, policy).await
-        }
-    }
-
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            self.task.abort();
-        }
-    }
-
-    fn browser_options() -> BrowserOptions {
-        BrowserOptions::new(
-            std::env::var_os("DARASH_TEST_BROWSER").expect(
-                "set DARASH_TEST_BROWSER to an installed Chromium executable; no downloads",
-            ),
-        )
-    }
-
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn cleanup_retains_group_after_leader_exit() {
-        let mut command = Command::new("/bin/sh");
-        command
-            .arg("-c")
-            .arg("sleep 30 & exit 0")
-            .process_group(0)
-            .kill_on_drop(true);
-        let child = command.spawn().unwrap();
-        let group = child.id().unwrap();
-        let profile = tempfile::tempdir().unwrap();
-        let profile_path = profile.path().to_owned();
-        let mut process = BrowserProcess {
-            child: Some(child),
-            process_group: Some(group),
-            profile: Some(profile),
-            _sink: TcpListener::bind("127.0.0.1:0").await.unwrap(),
-        };
-        process.child.as_mut().unwrap().wait().await.unwrap();
-        assert!(
-            process.child.as_ref().unwrap().id().is_none(),
-            "leader should be reaped"
-        );
-        process.close().await;
-        assert!(!profile_path.exists());
-        for _ in 0..100 {
-            // SAFETY: signal 0 only checks existence of this owned process group.
-            if unsafe { libc::kill(-(group as i32), 0) } == -1 {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        panic!("descendant survived cleanup of exited leader");
-    }
-
-    #[tokio::test]
-    #[ignore = "requires explicit installed Chromium; run with DARASH_TEST_BROWSER and --ignored"]
-    async fn chromium_js_static_path_status_redirects_and_extraction() {
-        let fixture = Fixture::start().await;
-        // Legacy static fetching still reports the initial shell without executing JS.
-        let static_report = crate::fetch::fetch(format!("http://{}/", fixture.address), &[])
-            .await
-            .unwrap();
-        assert!(static_report.body.contains("Loading shell"));
-        assert!(!static_report.body.contains("Rendered guide"));
-        let mut options = browser_options();
-        options.wait_for = Some("#ready".into());
-        let report = fixture.fetch("/redirect", &options).await.unwrap();
-        assert_eq!(report.status, Some(200));
-        assert!(report.ok && report.redirected);
-        assert_eq!(report.url, fixture.url("/"));
-        assert_eq!(report.bytes, report.body.len());
-        let main = crate::main_content::extract_main_content(
-            &report.body,
-            crate::main_content::MainContentFallback::Error,
-        )
-        .unwrap();
-        let markdown = crate::fetch::to_markdown(&main.html);
-        for content in [
-            "# Rendered guide",
-            "[a reference](/reference)",
-            "`cargo test`",
-            "| A | 1 |",
-        ] {
-            assert!(markdown.contains(content), "missing {content}");
-        }
-        assert!(
-            !markdown.contains("Navigation clutter") && !markdown.contains("Hidden CSS clutter")
-        );
-        assert_eq!(
-            crate::fetch::select_texts(&report.body, "h1").unwrap(),
-            ["Rendered guide"]
-        );
-        assert_eq!(crate::fetch::tables(&report.body).len(), 1);
-        options.wait_for = None;
-        let report = fixture.fetch("/404", &options).await.unwrap();
-        assert_eq!(report.status, Some(404));
-        assert!(!report.ok && report.body.contains("Missing page"));
-    }
-
-    #[tokio::test]
-    #[ignore = "requires explicit installed Chromium; run with DARASH_TEST_BROWSER and --ignored"]
-    async fn chromium_limits_timeouts_and_network_policy() {
-        let fixture = Fixture::start().await;
-        let mut options = browser_options();
-        for path in ["/private", "/subresource", "/download"] {
-            assert!(
-                matches!(
-                    fixture.fetch(path, &options).await,
-                    Err(BrowserError::Policy(_))
-                ),
-                "accepted {path}"
-            );
-        }
-        assert!(!fixture
-            .requests
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|request| request.contains("/secret")));
-        options.max_navigations = 2;
-        assert!(matches!(
-            fixture.fetch("/loop", &options).await,
-            Err(BrowserError::Limit(_))
-        ));
-        options.max_navigations = 10;
-        options.max_bytes = 1024;
-        for path in ["/big", "/grow", "/tamper"] {
-            assert!(
-                matches!(
-                    fixture.fetch(path, &options).await,
-                    Err(BrowserError::Limit(_))
-                ),
-                "accepted {path}"
-            );
-        }
-        options.max_bytes = FETCH_MAX_BODY_BYTES;
-        options.max_network_bytes = 10;
-        assert!(matches!(
-            fixture.fetch("/", &options).await,
-            Err(BrowserError::Limit(_))
-        ));
-        options.max_network_bytes = 8 * 1024 * 1024;
-        options.max_requests = 1;
-        assert!(matches!(
-            fixture.fetch("/", &options).await,
-            Err(BrowserError::Limit(_))
-        ));
-        options.max_requests = 128;
-        options.timeout = Duration::from_secs(2);
-        options.wait_for = Some("#never".into());
-        assert!(matches!(
-            fixture.fetch("/404", &options).await,
-            Err(BrowserError::Timeout)
-        ));
-        options.wait_for = None;
-        assert!(matches!(
-            fixture.fetch("/slow", &options).await,
-            Err(BrowserError::Timeout)
-        ));
-    }
-
-    #[tokio::test]
-    #[ignore = "requires explicit installed Chromium; run with DARASH_TEST_BROWSER and --ignored"]
-    async fn chromium_cleanup_on_cancellation_and_missing_executable() {
-        let options = browser_options();
-        let mut process = BrowserProcess::launch(&options.executable).await.unwrap();
-        process.endpoint().await.unwrap();
-        let pid = process.child.as_ref().unwrap().id().unwrap();
-        let profile = process.profile.as_ref().unwrap().path().to_owned();
-        drop(process); // Same RAII path as cancellation or the overall timeout.
-        for _ in 0..100 {
-            if !profile.exists() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert!(!profile.exists(), "temporary profile survived cancellation");
-        #[cfg(unix)]
-        // SAFETY: signal 0 only checks existence of the owned process group.
-        assert_eq!(
-            unsafe { libc::kill(-(pid as i32), 0) },
-            -1,
-            "browser process group survived cancellation"
-        );
-        let fixture = Fixture::start().await;
-        assert!(matches!(
-            fixture
-                .fetch("/", &BrowserOptions::new("/missing/chromium"))
-                .await,
-            Err(BrowserError::Executable(_))
-        ));
-    }
-
-    #[tokio::test]
-    #[ignore = "requires explicit installed Chromium; run with DARASH_TEST_BROWSER and --ignored"]
-    async fn chromium_credentials_and_unintercepted_paths_do_not_reach_destinations() {
-        let fixture = Fixture::start().await;
-        let mut options = browser_options();
-        options.wait_for = Some("#ready".into());
-        fixture.fetch("/auth", &options).await.unwrap();
-        let requests = fixture.requests.lock().unwrap().clone();
-        assert!(requests.iter().any(|request| request.contains("/capture")));
-        for request in requests {
-            let lower = request.to_ascii_lowercase();
-            assert!(
-                !lower.contains("authorization:") && !lower.contains("cookie:"),
-                "credentials forwarded: {request}"
-            );
-        }
-        let result = fixture.fetch("/unsupported", &options).await;
-        // Unsupported paths may cause an explicit policy failure. In either case,
-        // neither a popup, worker, service worker nor socket may hit the trap URL.
-        assert!(result.is_ok() || matches!(result, Err(BrowserError::Policy(_))));
-        assert!(!fixture
-            .requests
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|request| request.contains("/secret")));
-    }
-}
-
 fn is_public(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
@@ -1063,5 +704,364 @@ async fn render(
             previous.clear();
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn public_address_policy_rejects_special_use_and_mapped_addresses() {
+        for ip in [
+            "127.0.0.1",
+            "0.0.0.0",
+            "10.0.0.1",
+            "172.16.0.1",
+            "192.168.1.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "192.0.0.1",
+            "192.0.2.1",
+            "198.18.0.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::",
+            "::1",
+            "fc00::1",
+            "fe80::1",
+            "ff02::1",
+            "::ffff:8.8.8.8",
+            "2001:db8::1",
+            "2001::1",
+            "2002:7f00:1::",
+            "3fff::1",
+        ] {
+            assert!(!is_public(ip.parse().unwrap()), "accepted {ip}");
+        }
+        for ip in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
+            assert!(is_public(ip.parse().unwrap()), "rejected {ip}");
+        }
+    }
+
+    #[tokio::test]
+    async fn policy_rejects_credentials_schemes_and_numeric_loopback_before_launch() {
+        let options = BrowserOptions::new("/missing-browser");
+        for url in [
+            "file:///etc/passwd",
+            "ftp://example.test",
+            "data:text/html,hello",
+            "http://user:password@example.test",
+            "http://127.0.0.1",
+            "http://2130706433",
+            "http://[::1]",
+        ] {
+            assert!(
+                matches!(
+                    fetch_rendered(url, &options).await,
+                    Err(BrowserError::Policy(_))
+                ),
+                "accepted {url}"
+            );
+        }
+        let mut options = options;
+        options.timeout = Duration::ZERO;
+        assert!(matches!(
+            fetch_rendered("https://8.8.8.8", &options).await,
+            Err(BrowserError::Options(_))
+        ));
+    }
+
+    struct Fixture {
+        address: SocketAddr,
+        requests: Arc<Mutex<Vec<String>>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Fixture {
+        async fn start() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let captured = requests.clone();
+            let task = tokio::spawn(async move {
+                while let Ok((mut socket, _)) = listener.accept().await {
+                    let captured = captured.clone();
+                    tokio::spawn(async move {
+                        let mut buffer = vec![0; 16384];
+                        let length = socket.read(&mut buffer).await.unwrap_or(0);
+                        let request = String::from_utf8_lossy(&buffer[..length]).into_owned();
+                        let path = request.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                        captured.lock().unwrap().push(request);
+                        let (status, headers, body) = match path.as_str() {
+                            "/" => (200, "Content-Type: text/html\r\n".into(), include_str!("../tests/fixtures/rendered.html").to_owned()),
+                            "/app.js" => (200, "Content-Type: text/javascript\r\n".into(), include_str!("../tests/fixtures/app.js").to_owned()),
+                            "/404" => (404, "Content-Type: text/html\r\n".into(), "<main>Missing page</main>".into()),
+                            "/redirect" => (302, "Location: /\r\n".into(), String::new()),
+                            "/loop" => (302, "Location: /loop\r\n".into(), String::new()),
+                            "/private" => (302, format!("Location: http://127.0.0.1:{}/secret\r\n", address.port()), String::new()),
+                            "/subresource" => (200, "Content-Type: text/html\r\n".into(), format!("<main>Hello</main><script src='http://127.0.0.1:{}/secret'></script>", address.port())),
+                            "/big" => (200, "Content-Type: text/html\r\n".into(), "x".repeat(4096)),
+                            "/grow" => (200, "Content-Type: text/html\r\n".into(), "<script>document.write('<main>'+'x'.repeat(4096)+'</main>')</script>".into()),
+                            "/tamper" => (200, "Content-Type: text/html\r\n".into(), "<script>TextEncoder=class {encode(){return []}}; document.write('<main>'+'x'.repeat(4096)+'</main>')</script>".into()),
+                            "/slow" => { tokio::time::sleep(Duration::from_secs(3)).await; (200, String::new(), "Slow".into()) },
+                            "/download" => (200, "Content-Disposition: attachment; filename=download.html\r\n".into(), "<main>Download</main>".into()),
+                            "/auth" => (200, "Content-Type: text/html\r\nSet-Cookie: secret=value\r\n".into(), "<script>fetch('/auth-hop',{headers:{Authorization:'secret'}}).then(()=>document.body.innerHTML='<main id=ready>Done</main>')</script>".into()),
+                            "/auth-hop" => (302, format!("Location: http://other.fixture.test:{}/capture\r\n", address.port()), String::new()),
+                            "/unsupported" => (200, "Content-Type: text/html\r\n".into(), format!("<script>new WebSocket('ws://127.0.0.1:{0}/secret'); new Worker('/worker.js'); navigator.serviceWorker.register('/sw.js').catch(()=>{{}}); window.open('http://127.0.0.1:{0}/secret'); setTimeout(()=>document.body.innerHTML='<main id=ready>Done</main>',300)</script>", address.port())),
+                            "/worker.js" | "/sw.js" => (200, "Content-Type: text/javascript\r\n".into(), format!("fetch('http://127.0.0.1:{}/secret')", address.port())),
+                            "/capture" => (200, "Access-Control-Allow-Origin: *\r\nContent-Type: text/plain\r\n".into(), "Captured".into()),
+                            _ => (200, "Content-Type: text/html\r\n".into(), "<main>Fixture</main>".into()),
+                        };
+                        let response = format!("HTTP/1.1 {status} Fixture\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                        let _ = socket.write_all(response.as_bytes()).await;
+                    });
+                }
+            });
+            Self {
+                address,
+                requests,
+                task,
+            }
+        }
+
+        fn url(&self, path: &str) -> String {
+            format!("http://fixture.test:{}{path}", self.address.port())
+        }
+
+        async fn fetch(
+            &self,
+            path: &str,
+            options: &BrowserOptions,
+        ) -> Result<FetchReport, BrowserError> {
+            let policy = NetworkPolicy {
+                fixtures: vec![
+                    ("fixture.test".into(), self.address),
+                    ("other.fixture.test".into(), self.address),
+                ],
+            };
+            fetch_with_policy(&self.url(path), options, policy).await
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    fn browser_options() -> BrowserOptions {
+        BrowserOptions::new(
+            std::env::var_os("DARASH_TEST_BROWSER").expect(
+                "set DARASH_TEST_BROWSER to an installed Chromium executable; no downloads",
+            ),
+        )
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cleanup_retains_group_after_leader_exit() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("sleep 30 & exit 0")
+            .process_group(0)
+            .kill_on_drop(true);
+        let child = command.spawn().unwrap();
+        let group = child.id().unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let profile_path = profile.path().to_owned();
+        let mut process = BrowserProcess {
+            child: Some(child),
+            process_group: Some(group),
+            profile: Some(profile),
+            _sink: TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        };
+        process.child.as_mut().unwrap().wait().await.unwrap();
+        assert!(
+            process.child.as_ref().unwrap().id().is_none(),
+            "leader should be reaped"
+        );
+        process.close().await;
+        assert!(!profile_path.exists());
+        for _ in 0..100 {
+            // SAFETY: signal 0 only checks existence of this owned process group.
+            if unsafe { libc::kill(-(group as i32), 0) } == -1 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("descendant survived cleanup of exited leader");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires explicit installed Chromium; run with DARASH_TEST_BROWSER and --ignored"]
+    async fn chromium_js_static_path_status_redirects_and_extraction() {
+        let fixture = Fixture::start().await;
+        // Legacy static fetching still reports the initial shell without executing JS.
+        let static_report = crate::fetch::fetch(format!("http://{}/", fixture.address), &[])
+            .await
+            .unwrap();
+        assert!(static_report.body.contains("Loading shell"));
+        assert!(!static_report.body.contains("Rendered guide"));
+        let mut options = browser_options();
+        options.wait_for = Some("#ready".into());
+        let report = fixture.fetch("/redirect", &options).await.unwrap();
+        assert_eq!(report.status, Some(200));
+        assert!(report.ok && report.redirected);
+        assert_eq!(report.url, fixture.url("/"));
+        assert_eq!(report.bytes, report.body.len());
+        let main = crate::main_content::extract_main_content(
+            &report.body,
+            crate::main_content::MainContentFallback::Error,
+        )
+        .unwrap();
+        let markdown = crate::fetch::to_markdown(&main.html);
+        for content in [
+            "# Rendered guide",
+            "[a reference](/reference)",
+            "`cargo test`",
+            "| A | 1 |",
+        ] {
+            assert!(markdown.contains(content), "missing {content}");
+        }
+        assert!(
+            !markdown.contains("Navigation clutter") && !markdown.contains("Hidden CSS clutter")
+        );
+        assert_eq!(
+            crate::fetch::select_texts(&report.body, "h1").unwrap(),
+            ["Rendered guide"]
+        );
+        assert_eq!(crate::fetch::tables(&report.body).len(), 1);
+        options.wait_for = None;
+        let report = fixture.fetch("/404", &options).await.unwrap();
+        assert_eq!(report.status, Some(404));
+        assert!(!report.ok && report.body.contains("Missing page"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires explicit installed Chromium; run with DARASH_TEST_BROWSER and --ignored"]
+    async fn chromium_limits_timeouts_and_network_policy() {
+        let fixture = Fixture::start().await;
+        let mut options = browser_options();
+        for path in ["/private", "/subresource", "/download"] {
+            assert!(
+                matches!(
+                    fixture.fetch(path, &options).await,
+                    Err(BrowserError::Policy(_))
+                ),
+                "accepted {path}"
+            );
+        }
+        assert!(!fixture
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.contains("/secret")));
+        options.max_navigations = 2;
+        assert!(matches!(
+            fixture.fetch("/loop", &options).await,
+            Err(BrowserError::Limit(_))
+        ));
+        options.max_navigations = 10;
+        options.max_bytes = 1024;
+        for path in ["/big", "/grow", "/tamper"] {
+            assert!(
+                matches!(
+                    fixture.fetch(path, &options).await,
+                    Err(BrowserError::Limit(_))
+                ),
+                "accepted {path}"
+            );
+        }
+        options.max_bytes = FETCH_MAX_BODY_BYTES;
+        options.max_network_bytes = 10;
+        assert!(matches!(
+            fixture.fetch("/", &options).await,
+            Err(BrowserError::Limit(_))
+        ));
+        options.max_network_bytes = 8 * 1024 * 1024;
+        options.max_requests = 1;
+        assert!(matches!(
+            fixture.fetch("/", &options).await,
+            Err(BrowserError::Limit(_))
+        ));
+        options.max_requests = 128;
+        options.timeout = Duration::from_secs(2);
+        options.wait_for = Some("#never".into());
+        assert!(matches!(
+            fixture.fetch("/404", &options).await,
+            Err(BrowserError::Timeout)
+        ));
+        options.wait_for = None;
+        assert!(matches!(
+            fixture.fetch("/slow", &options).await,
+            Err(BrowserError::Timeout)
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires explicit installed Chromium; run with DARASH_TEST_BROWSER and --ignored"]
+    async fn chromium_cleanup_on_cancellation_and_missing_executable() {
+        let options = browser_options();
+        let mut process = BrowserProcess::launch(&options.executable).await.unwrap();
+        process.endpoint().await.unwrap();
+        let pid = process.child.as_ref().unwrap().id().unwrap();
+        let profile = process.profile.as_ref().unwrap().path().to_owned();
+        drop(process); // Same RAII path as cancellation or the overall timeout.
+        for _ in 0..100 {
+            if !profile.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!profile.exists(), "temporary profile survived cancellation");
+        #[cfg(unix)]
+        // SAFETY: signal 0 only checks existence of the owned process group.
+        assert_eq!(
+            unsafe { libc::kill(-(pid as i32), 0) },
+            -1,
+            "browser process group survived cancellation"
+        );
+        let fixture = Fixture::start().await;
+        assert!(matches!(
+            fixture
+                .fetch("/", &BrowserOptions::new("/missing/chromium"))
+                .await,
+            Err(BrowserError::Executable(_))
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires explicit installed Chromium; run with DARASH_TEST_BROWSER and --ignored"]
+    async fn chromium_credentials_and_unintercepted_paths_do_not_reach_destinations() {
+        let fixture = Fixture::start().await;
+        let mut options = browser_options();
+        options.wait_for = Some("#ready".into());
+        fixture.fetch("/auth", &options).await.unwrap();
+        let requests = fixture.requests.lock().unwrap().clone();
+        assert!(requests.iter().any(|request| request.contains("/capture")));
+        for request in requests {
+            let lower = request.to_ascii_lowercase();
+            assert!(
+                !lower.contains("authorization:") && !lower.contains("cookie:"),
+                "credentials forwarded: {request}"
+            );
+        }
+        let result = fixture.fetch("/unsupported", &options).await;
+        // Unsupported paths may cause an explicit policy failure. In either case,
+        // neither a popup, worker, service worker nor socket may hit the trap URL.
+        assert!(result.is_ok() || matches!(result, Err(BrowserError::Policy(_))));
+        assert!(!fixture
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.contains("/secret")));
     }
 }
