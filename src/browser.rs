@@ -403,10 +403,10 @@ impl Bridge<'_> {
                 continue;
             };
             let value: Value = serde_json::from_str(&text).map_err(transport)?;
-            if let Some(error) = value.get("error") {
-                return Err(BrowserError::Protocol(error.to_string()));
-            }
             if value["id"].as_u64() == Some(id) {
+                if let Some(error) = value.get("error") {
+                    return Err(BrowserError::Protocol(error.to_string()));
+                }
                 return Ok(value["result"].clone());
             }
             if value["method"] == "Fetch.requestPaused" {
@@ -774,6 +774,68 @@ mod tests {
             fetch_rendered("https://8.8.8.8", &options).await,
             Err(BrowserError::Options(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn review_regression_cdp_errors_are_correlated_to_awaited_call() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
+            let cancelled = socket.next().await.unwrap().unwrap();
+            let cancelled: Value = serde_json::from_str(cancelled.to_text().unwrap()).unwrap();
+            let awaited = socket.next().await.unwrap().unwrap();
+            let awaited: Value = serde_json::from_str(awaited.to_text().unwrap()).unwrap();
+            for reply in [
+                json!({"id":cancelled["id"],"error":{"message":"Invalid InterceptionId"}}),
+                json!({"id":awaited["id"],"result":{"ready":true}}),
+            ] {
+                socket
+                    .send(Message::Text(reply.to_string().into()))
+                    .await
+                    .unwrap();
+            }
+            let failed = socket.next().await.unwrap().unwrap();
+            let failed: Value = serde_json::from_str(failed.to_text().unwrap()).unwrap();
+            socket
+                .send(Message::Text(
+                    json!({"id":failed["id"],"error":{"message":"Actual call failure"}})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+        });
+        let (socket, _) = tokio_tungstenite::connect_async(format!("ws://{address}"))
+            .await
+            .unwrap();
+        let options = BrowserOptions::new("/unused-browser");
+        let mut bridge = Bridge {
+            socket,
+            next_id: 0,
+            session: None,
+            frame: String::new(),
+            options: &options,
+            policy: NetworkPolicy::default(),
+            requests: 0,
+            navigations: 0,
+            network_bytes: 0,
+            status: None,
+            content_type: None,
+            response_url: None,
+        };
+        bridge
+            .send("Fetch.failRequest", json!({"requestId":"cancelled"}))
+            .await
+            .unwrap();
+        let ready = bridge.call("Runtime.evaluate", json!({})).await;
+        let failed = bridge.call("Page.navigate", json!({})).await;
+        server.await.unwrap();
+        assert_eq!(ready.unwrap(), json!({"ready":true}));
+        assert!(
+            matches!(failed, Err(BrowserError::Protocol(message)) if message.contains("Actual call failure"))
+        );
     }
 
     struct Fixture {

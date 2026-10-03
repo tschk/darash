@@ -56,7 +56,6 @@ pub fn extract_main_content(
     }
 
     let links = Selector::parse("a").map_err(|_| MainContentError)?;
-    let paragraphs = Selector::parse("p").map_err(|_| MainContentError)?;
 
     for (selector, source) in [
         ("main, [role='main']", MainContentSource::Main),
@@ -69,18 +68,22 @@ pub fn extract_main_content(
         // Html::select visits detached nodes too; traverse only the live subtree.
         for candidate in document.root_element().select(&selector) {
             let text = candidate.text().collect::<String>();
-            let length = text.split_whitespace().map(str::len).sum::<usize>();
-            let link_length = candidate
-                .select(&links)
-                .flat_map(|link| link.text())
-                .map(str::len)
-                .sum::<usize>();
-            let score = length.saturating_sub(link_length);
+            let (score, paragraph_count) = if source == MainContentSource::Prose {
+                // Score the candidate's own paragraphs: summing the full subtree
+                // makes an outer wrapper always outrank its content descendants.
+                candidate
+                    .children()
+                    .filter_map(ElementRef::wrap)
+                    .filter(|child| child.value().name() == "p")
+                    .fold((0, 0), |(score, count), paragraph| {
+                        (score + non_link_score(paragraph, &links), count + 1)
+                    })
+            } else {
+                (non_link_score(candidate, &links), 0)
+            };
             // Semantic landmarks may contain a short title, code, or a table.
             // Unmarked content must contain substantial prose in two paragraphs.
-            if source == MainContentSource::Prose
-                && (score < 160 || candidate.select(&paragraphs).count() < 2)
-            {
+            if source == MainContentSource::Prose && (score < 160 || paragraph_count < 2) {
                 continue;
             }
             if !text.trim().is_empty() && (best.is_none() || score > best_score) {
@@ -102,6 +105,25 @@ pub fn extract_main_content(
             source: MainContentSource::FullDocument,
         }),
     }
+}
+
+fn non_link_score(element: ElementRef<'_>, links: &Selector) -> usize {
+    let length = element
+        .text()
+        .flat_map(str::split_whitespace)
+        .map(str::len)
+        .sum::<usize>();
+    let link_length = element
+        .select(links)
+        .flat_map(|link| link.text())
+        .map(str::len)
+        .sum::<usize>();
+    length.saturating_sub(link_length)
+}
+
+fn is_content_landmark(element: ElementRef<'_>) -> bool {
+    matches!(element.value().name(), "main" | "article")
+        || matches!(element.value().attr("role"), Some("main" | "article"))
 }
 
 fn is_clutter(element: ElementRef<'_>) -> bool {
@@ -129,7 +151,6 @@ fn is_clutter(element: ElementRef<'_>) -> bool {
         "nav"
             | "aside"
             | "footer"
-            | "form"
             | "script"
             | "style"
             | "noscript"
@@ -138,6 +159,17 @@ fn is_clutter(element: ElementRef<'_>) -> bool {
             | "canvas"
             | "head"
     ) {
+        return true;
+    }
+    // Some server-rendered pages put the whole document inside one form.
+    // Keep its content landmark; ordinary search/login forms remain clutter.
+    if value.name() == "form"
+        && !is_content_landmark(element)
+        && !element
+            .descendants()
+            .filter_map(ElementRef::wrap)
+            .any(is_content_landmark)
+    {
         return true;
     }
     if value.attr("role").is_some_and(|role| {
@@ -153,10 +185,7 @@ fn is_clutter(element: ElementRef<'_>) -> bool {
         && !element
             .ancestors()
             .filter_map(ElementRef::wrap)
-            .any(|parent| {
-                matches!(parent.value().name(), "main" | "article")
-                    || matches!(parent.value().attr("role"), Some("main" | "article"))
-            })
+            .any(is_content_landmark)
 }
 
 #[cfg(test)]
@@ -238,6 +267,41 @@ mod tests {
             let content = extract_main_content(html, MainContentFallback::FullDocument).unwrap();
             assert_eq!(content.source, MainContentSource::FullDocument);
             assert_eq!(content.html, html);
+        }
+    }
+
+    #[test]
+    fn review_regression_prose_prefers_content_over_outer_wrapper() {
+        let html = format!(
+            "<div id='wrapper'><div id='sidebar'><p>{}</p><p>{}</p></div><div id='content'><h1>Guide</h1><p>{}</p><p>{}</p></div></div>",
+            "Sidebar recommendation. ".repeat(6),
+            "Sidebar promotion. ".repeat(6),
+            "The guide explains useful details with concrete examples. ".repeat(8),
+            "The second paragraph adds context and practical steps. ".repeat(8)
+        );
+        let content = extract_main_content(&html, MainContentFallback::Error).unwrap();
+        assert_eq!(content.source, MainContentSource::Prose);
+        assert!(content.html.contains("Guide"));
+        assert!(!content.html.contains("Sidebar"), "selected outer wrapper");
+    }
+
+    #[test]
+    fn review_regression_form_wrapped_landmarks_survive() {
+        for (landmark, source) in [
+            ("main", MainContentSource::Main),
+            ("article", MainContentSource::Article),
+            ("div role='main'", MainContentSource::Main),
+            ("div role='article'", MainContentSource::Article),
+        ] {
+            let closing = landmark.split_whitespace().next().unwrap();
+            let html = format!(
+                "<form><{landmark}><h1>Guide</h1><p>Useful content</p><div role='search'>Search clutter</div></{closing}></form><form><input name='search'>Ordinary form</form>"
+            );
+            let content = extract_main_content(&html, MainContentFallback::Error)
+                .unwrap_or_else(|_| panic!("discarded form-wrapped {landmark}"));
+            assert_eq!(content.source, source);
+            assert!(content.html.contains("Useful content"));
+            assert!(!content.html.contains("Search clutter"));
         }
     }
 }
