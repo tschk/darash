@@ -18,3 +18,9 @@ jobs:
       - run: cargo build --locked
       - run: cargo test --locked
       - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo check --locked --no-default-features --lib
+      - run: cargo test --locked --features browser
+      - name: Synthetic Chromium fixtures (installed runtime, no downloads)
+        env:
+          DARASH_TEST_BROWSER: /usr/bin/google-chrome
+        run: cargo test --locked --features browser browser::tests::chromium -- --ignored --test-threads=1

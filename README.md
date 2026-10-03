@@ -4,7 +4,7 @@ Darash is an all-in-one research crate: provider-neutral async web search, page
 fetching, and HTML extraction in one dependency, with no API keys. Search runs
 on a small in-process multi-source backend by default and can also query a
 remote [SearxNG](https://docs.searxng.org/) endpoint; fetch and extraction turn
-any page into markdown, outlines, selector matches, rows, and tables — local,
+HTTP(S) pages into markdown, outlines, selector matches, rows, and tables — local,
 deterministic, and shaped for a context window.
 
 ## External SearxNG
@@ -138,6 +138,83 @@ Search finds sources; `darash::fetch` reads them. Every fetch returns a
 [`FetchReport`](https://docs.rs/darash) with the status, final URL, redirect
 flag, elapsed time, content type, size, and body — never silent, even for
 error statuses. Bodies are capped at 2 MiB.
+
+The default fetch is a fast HTTP request; it does not execute JavaScript.
+Main-content extraction is available without a browser or extra dependencies:
+
+```rust
+use darash::{fetch, main_content::{extract_main_content, MainContentFallback}};
+
+let content = extract_main_content(
+    "<nav>Menu</nav><main><h1>Guide</h1><p>Useful content.</p></main>",
+    MainContentFallback::Error,
+)?;
+let markdown = fetch::to_markdown(&content.html);
+# Ok::<(), darash::main_content::MainContentError>(())
+```
+
+It prefers `<main>`/`role="main"`, then article landmarks, then a conservative
+prose heuristic that compares the deepest qualifying containers, including
+wrapped paragraphs. It removes navigation, ordinary forms, complementary content, dialogs
+and explicitly hidden nodes while keeping links, code and tables. The returned
+`source` identifies the selection. Unrecognized pages return an error unless
+you explicitly choose `MainContentFallback::FullDocument`, which returns the
+original HTML. `to_markdown` and `to_text` continue to render the full document.
+
+For JavaScript pages, enable the optional `browser` feature and supply an
+installed Chromium or Google Chrome executable. No browser is downloaded, and
+no user profile is opened. Browser support currently requires macOS or Linux.
+
+```toml
+darash = { version = "0.7.0", features = ["browser"] }
+```
+
+```rust,ignore
+use darash::{browser::{fetch_rendered, BrowserOptions}, fetch};
+
+let mut options = BrowserOptions::new("/usr/bin/google-chrome");
+options.wait_for = Some("main".into());
+let report = fetch_rendered("https://example.com", &options).await?;
+let markdown = fetch::to_markdown(&report.body);
+```
+
+Rendering waits for DOM readiness, an optional selector, and 250 ms of unchanged
+DOM, under one 30-second deadline including startup and requests. For delayed
+applications, select an element that indicates the content is ready. Arbitrary
+long-running or continuously changing pages may time out. `BrowserOptions`
+exposes the deadline, settling interval, 2 MiB resource/DOM cap, 8 MiB aggregate
+resource cap, 128-request cap and 10-document-navigation cap. Cancellation and
+timeouts kill the owned browser process group and remove its temporary profile.
+`FetchReport` retains the HTTP status and final URL; browser `body` is the
+rendered DOM with computed hidden content annotated for extraction, and `bytes`
+is its UTF-8 size. Non-2xx HTTP pages still produce reports with `ok == false`.
+
+Browser rendering supports unauthenticated public HTTP(S) GET/HEAD resources.
+Each intercepted resource and redirect is checked for public IP addresses;
+the HTTP client pins DNS results, disables ambient proxies and never forwards
+cookies, authorization or user headers. Non-public and mixed public/private
+DNS results are rejected. A dedicated sink proxy prevents Chromium's other
+HTTP traffic from contacting destination servers; this is not an OS network
+sandbox. Subframes, WebSockets, service workers, worker-backed applications,
+downloads and non-GET/HEAD requests are unsupported. Browser runs bypass the
+CLI's static-fetch cache. Authentication and bot protections are not bypassed.
+
+```sh
+cargo install darash --features browser
+darash fetch https://example.com --md --main-content
+darash fetch https://example.com --md --main-content --main-fallback full
+darash fetch https://example.com --render --browser /usr/bin/google-chrome \
+  --wait-for main --md --main-content --budget 4000
+```
+
+To validate browser rendering against synthetic fixtures only, explicitly set
+an installed executable and run the ignored tests. The test-only synthetic
+host-to-loopback mapping is unavailable in production builds:
+
+```sh
+DARASH_TEST_BROWSER=/usr/bin/google-chrome cargo test --locked --features browser \
+  browser::tests::chromium -- --ignored --test-threads=1
+```
 
 ```rust,no_run
 use darash::fetch;

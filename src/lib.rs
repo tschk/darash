@@ -14,10 +14,13 @@ mod cache;
 mod embedded_search;
 mod websurfx;
 
+#[cfg(feature = "browser")]
+pub mod browser;
 #[cfg(feature = "client")]
 pub mod disk_cache;
 pub mod fetch;
 pub mod filter;
+pub mod main_content;
 
 pub use websurfx::{
     build_search_url as build_websurfx_search_url, WebsurfxEngineError, WebsurfxError,

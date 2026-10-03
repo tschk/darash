@@ -21,6 +21,10 @@ url = "2"
 log = "0.4.33"
 regex = "1"
 sha2 = "0.10"
+tokio-tungstenite = { version = "0.28", optional = true, default-features = false, features = ["connect"] }
+tempfile = { version = "3", optional = true }
+base64 = { version = "0.22", optional = true }
+libc = { version = "0.2", optional = true }
 
 [features]
 default = ["client", "search"]
@@ -28,6 +32,8 @@ default = ["client", "search"]
 # always available; disable `client` for wasm/no-network builds.
 client = ["dep:reqwest", "dep:native-tls", "dep:futures-util", "dep:tokio"]
 search = ["client"]
+# Uses an explicitly supplied installed Chromium; never downloads a browser.
+browser = ["client", "dep:tokio-tungstenite", "dep:tempfile", "dep:base64", "dep:libc", "tokio/process", "tokio/net", "tokio/time", "tokio/io-util"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
