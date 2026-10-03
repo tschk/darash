@@ -285,6 +285,7 @@ mod tests {
                             "/subresource" => (200, "Content-Type: text/html\r\n".into(), format!("<main>Hello</main><script src='http://127.0.0.1:{}/secret'></script>", address.port())),
                             "/big" => (200, "Content-Type: text/html\r\n".into(), "x".repeat(4096)),
                             "/grow" => (200, "Content-Type: text/html\r\n".into(), "<script>document.write('<main>'+'x'.repeat(4096)+'</main>')</script>".into()),
+                            "/tamper" => (200, "Content-Type: text/html\r\n".into(), "<script>TextEncoder=class {encode(){return []}}; document.write('<main>'+'x'.repeat(4096)+'</main>')</script>".into()),
                             "/slow" => { tokio::time::sleep(Duration::from_secs(3)).await; (200, String::new(), "Slow".into()) },
                             "/download" => (200, "Content-Disposition: attachment; filename=download.html\r\n".into(), "<main>Download</main>".into()),
                             "/auth" => (200, "Content-Type: text/html\r\nSet-Cookie: secret=value\r\n".into(), "<script>fetch('/auth-hop',{headers:{Authorization:'secret'}}).then(()=>document.body.innerHTML='<main id=ready>Done</main>')</script>".into()),
@@ -447,7 +448,7 @@ mod tests {
         ));
         options.max_navigations = 10;
         options.max_bytes = 1024;
-        for path in ["/big", "/grow"] {
+        for path in ["/big", "/grow", "/tamper"] {
             assert!(
                 matches!(
                     fixture.fetch(path, &options).await,
@@ -995,10 +996,21 @@ async fn render(
     let mut previous = String::new();
     let mut stable_since = Instant::now();
     loop {
+        // Use separate JS wrappers/prototypes so page scripts cannot replace
+        // TextEncoder or DOM methods used by readiness and serialization.
+        let world = bridge
+            .call(
+                "Page.createIsolatedWorld",
+                json!({"frameId":bridge.frame, "worldName":"darash-render"}),
+            )
+            .await?;
+        let context = world["executionContextId"]
+            .as_u64()
+            .ok_or_else(|| BrowserError::Protocol("missing isolated execution context".into()))?;
         let snapshot = bridge
             .call(
                 "Runtime.evaluate",
-                json!({"expression":expression, "returnByValue":true}),
+                json!({"expression":expression, "returnByValue":true, "contextId":context}),
             )
             .await?;
         if snapshot.get("exceptionDetails").is_some() {
@@ -1011,6 +1023,10 @@ async fn render(
             return Err(BrowserError::Limit("rendered DOM byte limit"));
         }
         if let (Some(html), Some(final_url)) = (value["html"].as_str(), value["url"].as_str()) {
+            // Always enforce the output contract in Rust, regardless of page JS.
+            if html.len() > options.max_bytes {
+                return Err(BrowserError::Limit("rendered DOM byte limit"));
+            }
             if html != previous {
                 previous = html.to_owned();
                 stable_since = Instant::now();
