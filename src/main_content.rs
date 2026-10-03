@@ -356,4 +356,40 @@ mod tests {
         assert_eq!(content.source, MainContentSource::Prose);
         assert!(to_markdown(&content.html).contains("[reference](/reference)"));
     }
+
+    #[test]
+    fn nested_semantic_content_keeps_the_main_landmark() {
+        let html = format!(
+            "<main><h1>Overview</h1><article><section><p>{}</p><p>{}</p></section></article><p>Conclusion</p><aside>Sidebar</aside></main>",
+            "Detailed article content. ".repeat(10),
+            "More article context. ".repeat(10)
+        );
+        let content = extract_main_content(&html, MainContentFallback::Error).unwrap();
+        assert_eq!(content.source, MainContentSource::Main);
+        for text in ["Overview", "Detailed article", "Conclusion"] {
+            assert!(content.html.contains(text));
+        }
+        assert!(!content.html.contains("Sidebar"));
+    }
+
+    #[test]
+    fn nested_prose_preserves_mixed_links_and_excludes_sibling_menus() {
+        let html = format!(
+            "<div id='wrapper'><div id='menu'><p><a href='/menu'>{}</a></p><p><a href='/menu'>{}</a></p></div><section><div id='content'><h1>Guide</h1><div><p>{}<a href='/reference'> a reference </a>{}</p></div><div><p>{}</p></div></div></section><div id='sidebar'><p>{}</p><p>{}</p></div></div>",
+            "Link menu. ".repeat(100),
+            "Link menu. ".repeat(100),
+            "Useful details. ".repeat(10),
+            "More prose. ".repeat(10),
+            "Practical steps. ".repeat(10),
+            "Sidebar promotion. ".repeat(6),
+            "Sidebar recommendation. ".repeat(6)
+        );
+        let content = extract_main_content(&html, MainContentFallback::Error).unwrap();
+        assert_eq!(content.source, MainContentSource::Prose);
+        let markdown = to_markdown(&content.html);
+        assert!(markdown.contains("# Guide"));
+        assert!(markdown.contains("[a reference](/reference)"));
+        assert!(markdown.contains("Practical steps"));
+        assert!(!markdown.contains("Sidebar") && !markdown.contains("Link menu"));
+    }
 }
