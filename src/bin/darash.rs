@@ -102,6 +102,11 @@ struct FetchArgs {
     where_: Option<String>,
     fresh: bool,
     no_cache: bool,
+    render: bool,
+    browser: Option<PathBuf>,
+    wait_for: Option<String>,
+    main_content: bool,
+    main_fallback_full: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -159,6 +164,7 @@ async fn run_search(args: SearchArgs) -> Result<(), String> {
 
 async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     let extraction = pick_extraction(&args)?;
+    validate_page_options(&args, extraction)?;
     let structured = matches!(
         extraction,
         Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
@@ -186,6 +192,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
             && value.to_ascii_lowercase().contains("no-store")
     });
     let cacheable = is_url
+        && !args.render
         && !args.no_cache
         && disk_cache::should_cache(
             &args.input,
@@ -223,10 +230,27 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
             return Ok(fail_code(&args, &report));
         }
         Extraction::Markdown | Extraction::Text => {
-            let rendered = if extraction == Extraction::Markdown {
-                fetch::to_markdown(&report.body)
+            let main = if args.main_content {
+                let fallback = if args.main_fallback_full {
+                    darash::main_content::MainContentFallback::FullDocument
+                } else {
+                    darash::main_content::MainContentFallback::Error
+                };
+                let content = darash::main_content::extract_main_content(&report.body, fallback)
+                    .map_err(|error| error.to_string())?;
+                eprintln!("darash fetch: content={:?}", content.source);
+                Some(content)
             } else {
-                fetch::to_text(&report.body)
+                None
+            };
+            let html = main
+                .as_ref()
+                .map(|content| content.html.as_str())
+                .unwrap_or(&report.body);
+            let rendered = if extraction == Extraction::Markdown {
+                fetch::to_markdown(html)
+            } else {
+                fetch::to_text(html)
             };
             eprintln!("darash fetch: {}", report.summary());
             emit_document(rendered, &report, args.budget, args.json);
@@ -363,6 +387,28 @@ async fn fetch_report(
     method: &str,
     cacheable: bool,
 ) -> Result<FetchReport, String> {
+    if args.render {
+        #[cfg(feature = "browser")]
+        {
+            let mut options = darash::browser::BrowserOptions::new(
+                args.browser
+                    .as_ref()
+                    .ok_or("--render requires --browser PATH")?,
+            );
+            if let Some(timeout) = args.max_time {
+                options.timeout = timeout;
+            }
+            if let Some(max_bytes) = args.max_bytes {
+                options.max_bytes = max_bytes;
+            }
+            options.wait_for = args.wait_for.clone();
+            return darash::browser::fetch_rendered(&args.input, &options)
+                .await
+                .map_err(|error| error.to_string());
+        }
+        #[cfg(not(feature = "browser"))]
+        return Err("--render requires a build with the browser feature (cargo install darash --features browser)".into());
+    }
     if cacheable && !args.fresh {
         if let Some((report, age)) = disk_cache::load(&args.input).await {
             // A cached body larger than an explicit cap must not satisfy it.
@@ -392,6 +438,45 @@ async fn fetch_report(
         let _ = disk_cache::store(&args.input, &report).await;
     }
     Ok(report)
+}
+
+fn validate_page_options(args: &FetchArgs, extraction: Extraction) -> Result<(), String> {
+    if args.main_content && !matches!(extraction, Extraction::Markdown | Extraction::Text) {
+        return Err("--main-content requires --md or --text".into());
+    }
+    if args.main_fallback_full && !args.main_content {
+        return Err("--main-fallback full requires --main-content".into());
+    }
+    if !args.render && (args.browser.is_some() || args.wait_for.is_some()) {
+        return Err("--browser/--wait-for require --render".into());
+    }
+    if args.render {
+        if !(args.input.starts_with("http://") || args.input.starts_with("https://")) {
+            return Err(
+                "--render requires an HTTP(S) URL; local files are not browser inputs".into(),
+            );
+        }
+        if args.browser.is_none() {
+            return Err(
+                "--render requires --browser PATH to an installed Chromium/Chrome executable"
+                    .into(),
+            );
+        }
+        if args.method.as_deref().is_some_and(|method| method != "GET")
+            || args.data.is_some()
+            || args.basic_auth.is_some()
+            || !args.headers.is_empty()
+            || args.insecure
+        {
+            return Err(
+                "--render supports unauthenticated GET only; custom request flags are unsupported"
+                    .into(),
+            );
+        }
+        #[cfg(not(feature = "browser"))]
+        return Err("--render requires a build with the browser feature (cargo install darash --features browser)".into());
+    }
+    Ok(())
 }
 
 fn build_records(
@@ -796,6 +881,26 @@ fn parse_fetch_args(args: &[String]) -> Result<Option<FetchArgs>, String> {
                 "head" => parsed.head = true,
                 "fresh" => parsed.fresh = true,
                 "no-cache" => parsed.no_cache = true,
+                "render" => parsed.render = true,
+                "main-content" => parsed.main_content = true,
+                "browser" => {
+                    parsed.browser = Some(PathBuf::from(option_value(
+                        args,
+                        &mut index,
+                        inline,
+                        "--browser",
+                    )?))
+                }
+                "wait-for" => {
+                    parsed.wait_for = Some(option_value(args, &mut index, inline, "--wait-for")?)
+                }
+                "main-fallback" => {
+                    let value = option_value(args, &mut index, inline, "--main-fallback")?;
+                    if value != "full" {
+                        return Err("--main-fallback accepts only full".into());
+                    }
+                    parsed.main_fallback_full = true;
+                }
                 // Accepted no-op: curl's compressed-transfer request.
                 "compressed" => {}
                 "select" => {
@@ -1069,7 +1174,9 @@ fn usage() -> &'static str {
     request:    -X/--method M, -d/--data BODY|@FILE|@-, --data-raw B, --data-binary B, -u USER:PASS,
                 -I/--head, -k/--insecure, -m/--max-time SECS, --max-bytes N, --header 'Name: value'
     output:     -o FILE, -f/--fail, --limit N, --budget N, --offset N, --where EXPR, --json, --json-envelope
-    cache:      --fresh, --no-cache"
+    cache:      --fresh, --no-cache
+    content:    --main-content (with --md/--text), --main-fallback full
+    browser:    --render --browser PATH [--wait-for CSS] (browser feature, public HTTP(S), no cache)"
 }
 
 fn print_usage() {
@@ -1095,6 +1202,65 @@ mod tests {
             panic!("expected fetch command");
         };
         *fetch
+    }
+
+    #[test]
+    fn parses_and_validates_content_options() {
+        let fetch = fetch_args(&[
+            "fetch",
+            "page.html",
+            "--md",
+            "--main-content",
+            "--main-fallback=full",
+        ]);
+        assert!(fetch.main_content && fetch.main_fallback_full);
+        assert!(validate_page_options(&fetch, pick_extraction(&fetch).unwrap()).is_ok());
+        for list in [
+            vec!["fetch", "page.html", "--main-content"],
+            vec!["fetch", "page.html", "--md", "--main-fallback", "full"],
+            vec!["fetch", "page.html", "--wait-for", "main"],
+        ] {
+            let fetch = fetch_args(&list);
+            assert!(validate_page_options(&fetch, pick_extraction(&fetch).unwrap()).is_err());
+        }
+        assert!(parse_args(&args(&["fetch", "page.html", "--main-fallback", "auto"])).is_err());
+    }
+
+    #[test]
+    fn browser_options_reject_local_files_and_request_credentials() {
+        for input in ["page.html", "file:///tmp/page.html"] {
+            let fetch = fetch_args(&["fetch", input, "--render", "--browser", "/chrome"]);
+            assert!(validate_page_options(&fetch, Extraction::Report)
+                .unwrap_err()
+                .contains("HTTP(S)"));
+        }
+        let fetch = fetch_args(&[
+            "fetch",
+            "https://example.test",
+            "--render",
+            "--browser",
+            "/chrome",
+            "-u",
+            "user:pass",
+        ]);
+        assert!(validate_page_options(&fetch, Extraction::Report)
+            .unwrap_err()
+            .contains("unauthenticated GET"));
+        let fetch = fetch_args(&[
+            "fetch",
+            "https://example.test",
+            "--render",
+            "--browser",
+            "/chrome",
+            "--wait-for=main",
+        ]);
+        assert_eq!(fetch.wait_for.as_deref(), Some("main"));
+        #[cfg(not(feature = "browser"))]
+        assert!(validate_page_options(&fetch, Extraction::Report)
+            .unwrap_err()
+            .contains("browser feature"));
+        #[cfg(feature = "browser")]
+        assert!(validate_page_options(&fetch, Extraction::Report).is_ok());
     }
 
     #[test]
