@@ -4,6 +4,8 @@
 //! This is extraction, not a universal readability classifier. The caller must
 //! explicitly choose whether an unrecognized page falls back to the document.
 
+use std::collections::HashSet;
+
 use scraper::{ElementRef, Html, Selector};
 
 /// What to do when no main-content candidate is recognized.
@@ -56,6 +58,7 @@ pub fn extract_main_content(
     }
 
     let links = Selector::parse("a").map_err(|_| MainContentError)?;
+    let paragraphs = Selector::parse("p").map_err(|_| MainContentError)?;
 
     for (selector, source) in [
         ("main, [role='main']", MainContentSource::Main),
@@ -63,30 +66,40 @@ pub fn extract_main_content(
         ("section, div", MainContentSource::Prose),
     ] {
         let selector = Selector::parse(selector).map_err(|_| MainContentError)?;
-        let mut best = None;
-        let mut best_score = 0;
+        let mut candidates = Vec::new();
         // Html::select visits detached nodes too; traverse only the live subtree.
         for candidate in document.root_element().select(&selector) {
-            let text = candidate.text().collect::<String>();
-            let (score, paragraph_count) = if source == MainContentSource::Prose {
-                // Score the candidate's own paragraphs: summing the full subtree
-                // makes an outer wrapper always outrank its content descendants.
-                candidate
-                    .children()
-                    .filter_map(ElementRef::wrap)
-                    .filter(|child| child.value().name() == "p")
-                    .fold((0, 0), |(score, count), paragraph| {
-                        (score + non_link_score(paragraph, &links), count + 1)
-                    })
-            } else {
-                (non_link_score(candidate, &links), 0)
-            };
+            let score = non_link_score(candidate, &links);
             // Semantic landmarks may contain a short title, code, or a table.
             // Unmarked content must contain substantial prose in two paragraphs.
-            if source == MainContentSource::Prose && (score < 160 || paragraph_count < 2) {
+            if source == MainContentSource::Prose
+                && (score < 160 || candidate.select(&paragraphs).count() < 2)
+            {
                 continue;
             }
-            if !text.trim().is_empty() && (best.is_none() || score > best_score) {
+            if candidate.text().any(|text| !text.trim().is_empty()) {
+                candidates.push((candidate, score));
+            }
+        }
+        // Wrapped paragraphs can qualify, but an outer wrapper must not inherit
+        // a qualifying content block's score and retain sibling sidebar clutter.
+        let outer_wrappers: HashSet<_> = if source == MainContentSource::Prose {
+            candidates
+                .iter()
+                .flat_map(|(candidate, _)| {
+                    candidate
+                        .ancestors()
+                        .filter(move |ancestor| ancestor.id() != candidate.id())
+                })
+                .map(|ancestor| ancestor.id())
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        let mut best = None;
+        let mut best_score = 0;
+        for (candidate, score) in candidates {
+            if !outer_wrappers.contains(&candidate.id()) && (best.is_none() || score > best_score) {
                 best = Some(candidate);
                 best_score = score;
             }
@@ -116,6 +129,7 @@ fn non_link_score(element: ElementRef<'_>, links: &Selector) -> usize {
     let link_length = element
         .select(links)
         .flat_map(|link| link.text())
+        .flat_map(str::split_whitespace)
         .map(str::len)
         .sum::<usize>();
     length.saturating_sub(link_length)
@@ -303,5 +317,43 @@ mod tests {
             assert!(content.html.contains("Useful content"));
             assert!(!content.html.contains("Search clutter"));
         }
+    }
+
+    #[test]
+    fn review_regression_wrapped_prose_qualifies_without_sidebar() {
+        let article = format!(
+            "<div id='content'><h1>Guide</h1><div><p>{}</p></div><div><p>{}</p></div></div>",
+            "Useful guidance with detailed examples. ".repeat(8),
+            "Further context and practical steps. ".repeat(8)
+        );
+        for html in [
+            article.clone(),
+            format!(
+                "<div id='wrapper'><div id='sidebar'><p>{}</p><p>{}</p></div>{article}</div>",
+                "Sidebar recommendation. ".repeat(6),
+                "Sidebar promotion. ".repeat(6)
+            ),
+        ] {
+            let content = extract_main_content(&html, MainContentFallback::Error)
+                .expect("wrapped prose should qualify");
+            assert_eq!(content.source, MainContentSource::Prose);
+            assert!(content.html.contains("Guide"));
+            assert!(!content.html.contains("Sidebar"));
+        }
+    }
+
+    #[test]
+    fn review_regression_link_whitespace_does_not_reduce_prose_score() {
+        let html = format!(
+            "<div><p>{}<a href='/reference'>{}reference{}</a></p><p>{}</p></div>",
+            "Useful prose. ".repeat(12),
+            " \n ".repeat(100),
+            " \n ".repeat(100),
+            "More context. ".repeat(4)
+        );
+        let content = extract_main_content(&html, MainContentFallback::Error)
+            .expect("link whitespace must not subtract non-link prose");
+        assert_eq!(content.source, MainContentSource::Prose);
+        assert!(to_markdown(&content.html).contains("[reference](/reference)"));
     }
 }

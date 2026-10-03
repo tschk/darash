@@ -154,7 +154,8 @@ let markdown = fetch::to_markdown(&content.html);
 ```
 
 It prefers `<main>`/`role="main"`, then article landmarks, then a conservative
-prose heuristic. It removes navigation, forms, complementary content, dialogs
+prose heuristic that compares the deepest qualifying containers, including
+wrapped paragraphs. It removes navigation, ordinary forms, complementary content, dialogs
 and explicitly hidden nodes while keeping links, code and tables. The returned
 `source` identifies the selection. Unrecognized pages return an error unless
 you explicitly choose `MainContentFallback::FullDocument`, which returns the
