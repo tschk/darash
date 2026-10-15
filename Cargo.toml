@@ -1,6 +1,6 @@
 [package]
 name = "darash"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 license = "ISC"
 description = "All-in-one research crate: async search, page fetch, and HTML extraction with no API keys"
