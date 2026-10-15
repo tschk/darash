@@ -144,73 +144,12 @@ fn tokenize(input: &str) -> Result<Vec<Token>, FilterError> {
             i += 1;
             continue;
         }
+        if let Some((token, next)) = lex_operator(&chars, i, c)? {
+            tokens.push(token);
+            i = next;
+            continue;
+        }
         match c {
-            '|' => {
-                if chars.get(i + 1) == Some(&'|') {
-                    tokens.push(Token::Or);
-                    i += 2;
-                } else {
-                    return Err(FilterError::UnexpectedChar(c, i));
-                }
-            }
-            '&' => {
-                if chars.get(i + 1) == Some(&'&') {
-                    tokens.push(Token::And);
-                    i += 2;
-                } else {
-                    return Err(FilterError::UnexpectedChar(c, i));
-                }
-            }
-            '=' => {
-                if chars.get(i + 1) == Some(&'=') {
-                    tokens.push(Token::Eq);
-                    i += 2;
-                } else {
-                    return Err(FilterError::UnexpectedChar(c, i));
-                }
-            }
-            '!' => {
-                if chars.get(i + 1) == Some(&'=') {
-                    tokens.push(Token::Ne);
-                    i += 2;
-                } else if chars.get(i + 1) == Some(&'~') {
-                    tokens.push(Token::NotMatch);
-                    i += 2;
-                } else {
-                    tokens.push(Token::Not);
-                    i += 1;
-                }
-            }
-            '~' => {
-                tokens.push(Token::Match);
-                i += 1;
-            }
-            '>' => {
-                if chars.get(i + 1) == Some(&'=') {
-                    tokens.push(Token::Ge);
-                    i += 2;
-                } else {
-                    tokens.push(Token::Gt);
-                    i += 1;
-                }
-            }
-            '<' => {
-                if chars.get(i + 1) == Some(&'=') {
-                    tokens.push(Token::Le);
-                    i += 2;
-                } else {
-                    tokens.push(Token::Lt);
-                    i += 1;
-                }
-            }
-            '(' => {
-                tokens.push(Token::LParen);
-                i += 1;
-            }
-            ')' => {
-                tokens.push(Token::RParen);
-                i += 1;
-            }
             '"' | '\'' => {
                 let (value, next) = lex_string(&chars, i, c)?;
                 tokens.push(Token::Str(value));
@@ -253,6 +192,59 @@ fn tokenize(input: &str) -> Result<Vec<Token>, FilterError> {
         }
     }
     Ok(tokens)
+}
+
+fn lex_operator(chars: &[char], i: usize, c: char) -> Result<Option<(Token, usize)>, FilterError> {
+    match c {
+        '|' => {
+            if chars.get(i + 1) == Some(&'|') {
+                Ok(Some((Token::Or, i + 2)))
+            } else {
+                Err(FilterError::UnexpectedChar(c, i))
+            }
+        }
+        '&' => {
+            if chars.get(i + 1) == Some(&'&') {
+                Ok(Some((Token::And, i + 2)))
+            } else {
+                Err(FilterError::UnexpectedChar(c, i))
+            }
+        }
+        '=' => {
+            if chars.get(i + 1) == Some(&'=') {
+                Ok(Some((Token::Eq, i + 2)))
+            } else {
+                Err(FilterError::UnexpectedChar(c, i))
+            }
+        }
+        '!' => {
+            if chars.get(i + 1) == Some(&'=') {
+                Ok(Some((Token::Ne, i + 2)))
+            } else if chars.get(i + 1) == Some(&'~') {
+                Ok(Some((Token::NotMatch, i + 2)))
+            } else {
+                Ok(Some((Token::Not, i + 1)))
+            }
+        }
+        '~' => Ok(Some((Token::Match, i + 1))),
+        '>' => {
+            if chars.get(i + 1) == Some(&'=') {
+                Ok(Some((Token::Ge, i + 2)))
+            } else {
+                Ok(Some((Token::Gt, i + 1)))
+            }
+        }
+        '<' => {
+            if chars.get(i + 1) == Some(&'=') {
+                Ok(Some((Token::Le, i + 2)))
+            } else {
+                Ok(Some((Token::Lt, i + 1)))
+            }
+        }
+        '(' => Ok(Some((Token::LParen, i + 1))),
+        ')' => Ok(Some((Token::RParen, i + 1))),
+        _ => Ok(None),
+    }
 }
 
 fn lex_string(chars: &[char], start: usize, quote: char) -> Result<(String, usize), FilterError> {

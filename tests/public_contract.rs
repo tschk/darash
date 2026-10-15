@@ -115,6 +115,12 @@ async fn query_validation_completes_before_network_access() {
             .await,
         Err(Error::InvalidPage)
     ));
+    assert!(matches!(
+        client
+            .search_websurfx(&WebsurfxQuery::new("rust").with_safe_search(5))
+            .await,
+        Err(Error::InvalidSafeSearch)
+    ));
 
     let timeout = client
         .config()

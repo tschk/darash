@@ -7,8 +7,6 @@
 
 use std::collections::HashMap;
 
-#[cfg(feature = "client")]
-use std::io::Read;
 use std::time::Duration;
 #[cfg(feature = "client")]
 use std::time::Instant;
@@ -822,12 +820,10 @@ pub fn apply_budget(items: Vec<String>, budget: Option<usize>) -> Budgeted {
 
 /// Read a local file as a fetch report. URLs stay on the network path.
 #[cfg(feature = "client")]
-pub fn read_source(path: impl AsRef<std::path::Path>) -> Result<FetchReport, Error> {
+pub async fn read_source(path: impl AsRef<std::path::Path>) -> Result<FetchReport, Error> {
     let path = path.as_ref();
-    let mut file = std::fs::File::open(path)
-        .map_err(|error| Error::SourceRead(format!("cannot read {}: {error}", path.display())))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
+    let bytes = tokio::fs::read(path)
+        .await
         .map_err(|error| Error::SourceRead(format!("cannot read {}: {error}", path.display())))?;
     if bytes.len() > FETCH_MAX_BODY_BYTES {
         return Err(Error::FetchBodyTooLarge {
@@ -893,15 +889,11 @@ fn visit_locate(
             break;
         }
     }
-    let child_hit = element.child_elements().any(|child| {
-        child
-            .text()
-            .collect::<String>()
-            .to_lowercase()
-            .contains(needle)
-    });
+    let child_hit = element
+        .child_elements()
+        .any(|child| text_contains(child.text(), needle));
     let text = element.text().collect::<String>();
-    let text_hit = !child_hit && text.to_lowercase().contains(needle);
+    let text_hit = !child_hit && text_contains(element.text(), needle);
 
     path.push(PathPart { tag, id, classes });
     if let Some((name, attr_value)) = attr_hit {
@@ -924,6 +916,16 @@ fn visit_locate(
         visit_locate(child, path, needle, hits);
     }
     path.pop();
+}
+
+fn text_contains<'a>(text_iter: impl Iterator<Item = &'a str>, needle: &str) -> bool {
+    let mut s = text_iter.collect::<String>();
+    if s.is_ascii() {
+        s.make_ascii_lowercase();
+        s.contains(needle)
+    } else {
+        s.to_lowercase().contains(needle)
+    }
 }
 
 fn selector_path(path: &[PathPart]) -> String {
@@ -1081,9 +1083,101 @@ mod tests {
     }
 
     #[test]
+    fn to_markdown_exact_output() {
+        // Headings and paragraphs
+        assert_eq!(
+            to_markdown("<h1>Heading 1</h1><p>Paragraph text.</p><h2>Heading 2</h2>"),
+            "# Heading 1\n\nParagraph text.\n\n## Heading 2\n"
+        );
+
+        // Bold and italics
+        assert_eq!(
+            to_markdown("<p>This is <strong>bold</strong> and <em>italic</em>.</p>"),
+            "This is **bold** and *italic*.\n"
+        );
+        assert_eq!(
+            to_markdown("<p>This is <b>bold</b> and <i>italic</i>.</p>"),
+            "This is **bold** and *italic*.\n"
+        );
+
+        // Links
+        assert_eq!(
+            to_markdown("<a href=\"https://example.com\">Example</a>"),
+            "[Example](https://example.com)\n"
+        );
+        assert_eq!(
+            to_markdown("<a href=\"https://example.com\"></a>"),
+            "[https://example.com](https://example.com)\n"
+        );
+
+        // Code and Preformatted text
+        assert_eq!(
+            to_markdown("<p>Use <code>cargo run</code></p>"),
+            "Use `cargo run`\n"
+        );
+        assert_eq!(
+            to_markdown("<pre>fn main() {\n    println!(\"Hello\");\n}</pre>"),
+            "```\nfn main() {\n    println!(\"Hello\");\n}\n```\n"
+        );
+
+        // Lists
+        assert_eq!(
+            to_markdown("<ul><li>Item 1</li><li>Item 2</li></ul>"),
+            "- Item 1\n- Item 2\n"
+        );
+        assert_eq!(
+            to_markdown("<ol><li>First</li><li>Second</li></ol>"),
+            "1. First\n2. Second\n"
+        );
+
+        // Blockquotes
+        assert_eq!(
+            to_markdown("<blockquote><p>To be</p><p>or not to be</p></blockquote>"),
+            "> To be\n> \n> or not to be\n"
+        );
+
+        // Horizontal rules
+        assert_eq!(to_markdown("<hr>"), "---\n");
+
+        // Ignored elements
+        assert_eq!(
+            to_markdown("<script>alert(1);</script><style>body{}</style><p>Visible</p>"),
+            "Visible\n"
+        );
+
+        // Whitespace collapsing
+        assert_eq!(
+            to_markdown("<p>   Multiple    spaces\nand newlines   </p>"),
+            "Multiple spaces and newlines\n"
+        );
+    }
+
+    #[test]
     fn plain_mode_strips_markup() {
         let text = to_text("<h1>Hi</h1><p>See <a href=\"/x\">this</a> and <b>bold</b>.</p>");
         assert_eq!(text, "Hi\n\nSee this and bold.\n");
+    }
+
+    #[test]
+    fn plain_mode_strips_block_markdown_formatting() {
+        let text = to_text("<h1>Heading</h1><pre><code>let x = 1;</code></pre><hr>");
+        assert_eq!(text, "Heading\n\nlet x = 1;\n");
+    }
+
+    #[test]
+    fn plain_mode_strips_inline_markdown_formatting() {
+        let text = to_text("<p><b>bold</b> <i>italic</i> <code>code</code> <img src=\"img.png\" alt=\"image\"> <a href=\"/link\">link</a></p>");
+        assert_eq!(text, "bold italic code  link\n");
+    }
+
+    #[test]
+    fn plain_mode_preserves_structural_markers() {
+        let text = to_text("<ul><li>One</li></ul><ol><li>Two</li></ol><blockquote>Quote</blockquote><table><tr><th>Header</th></tr><tr><td>Data</td></tr></table>");
+        assert!(text.contains("- One"));
+        assert!(text.contains("1. Two"));
+        assert!(text.contains("> Quote"));
+        assert!(text.contains("| Header |"));
+        assert!(text.contains("| Data |"));
     }
 
     #[test]
@@ -1132,12 +1226,75 @@ mod tests {
     }
 
     #[test]
+    fn parse_row_spec_parses_valid_specs() {
+        let single = parse_row_spec("name=selector").expect("valid spec");
+        assert_eq!(single, vec![("name".to_owned(), "selector".to_owned())]);
+
+        let multiple = parse_row_spec("title=h1, url=a@href").expect("valid spec");
+        assert_eq!(
+            multiple,
+            vec![
+                ("title".to_owned(), "h1".to_owned()),
+                ("url".to_owned(), "a@href".to_owned())
+            ]
+        );
+
+        let with_whitespace =
+            parse_row_spec("  name  =  selector  ,  name2  =  selector2  ").expect("valid spec");
+        assert_eq!(
+            with_whitespace,
+            vec![
+                ("name".to_owned(), "selector".to_owned()),
+                ("name2".to_owned(), "selector2".to_owned())
+            ]
+        );
+
+        let extraneous_commas = parse_row_spec("name=selector,, ,").expect("valid spec");
+        assert_eq!(
+            extraneous_commas,
+            vec![("name".to_owned(), "selector".to_owned())]
+        );
+
+        let multiple_equals = parse_row_spec("name=sel=ector").expect("valid spec");
+        assert_eq!(
+            multiple_equals,
+            vec![("name".to_owned(), "sel=ector".to_owned())]
+        );
+    }
+
+    #[test]
     fn row_spec_rejects_malformed_fields() {
         let error = parse_row_spec("title").expect_err("missing = is rejected");
         assert!(error.to_string().contains("missing '='"));
 
         let error = parse_row_spec("").expect_err("empty spec is rejected");
         assert!(error.to_string().contains("empty"));
+
+        let error = parse_row_spec(",,,").expect_err("only commas is empty");
+        assert!(error.to_string().contains("empty"));
+    }
+
+    #[test]
+    fn parse_row_spec_rejects_missing_names_or_selectors() {
+        let error = parse_row_spec("=selector").expect_err("empty name");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
+
+        let error = parse_row_spec("name=").expect_err("empty selector");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
+
+        let error = parse_row_spec("=").expect_err("empty name and selector");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
+
+        let error = parse_row_spec("a=b, =c").expect_err("one valid, one invalid");
+        assert!(error
+            .to_string()
+            .contains("needs both a name and a selector"));
     }
 
     #[test]
@@ -1176,13 +1333,13 @@ mod tests {
         assert_eq!(estimate_tokens("abcde"), 2);
     }
 
-    #[test]
-    fn local_reports_read_files_without_http() {
+    #[tokio::test]
+    async fn local_reports_read_files_without_http() {
         let mut path = std::env::temp_dir();
         path.push(format!("darash-fetch-test-{}.html", std::process::id()));
         std::fs::write(&path, "<h1>Local</h1>").expect("fixture writes");
 
-        let report = read_source(&path).expect("fixture reads");
+        let report = read_source(&path).await.expect("fixture reads");
         assert_eq!(report.status, None);
         assert!(report.ok);
         assert_eq!(report.body, "<h1>Local</h1>");
