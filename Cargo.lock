@@ -297,7 +297,7 @@ dependencies = [
 
 [[package]]
 name = "darash"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "base64",
  "criterion",
