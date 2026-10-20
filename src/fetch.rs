@@ -1037,6 +1037,30 @@ pub fn paginate(total: usize, offset: usize, limit: usize) -> PageMeta {
 mod tests {
     use super::*;
 
+    #[test]
+    fn fetch_report_summary_formats_correctly() {
+        let mut report = FetchReport {
+            status: Some(200),
+            ok: true,
+            url: "https://example.com".to_owned(),
+            redirected: false,
+            ms: 42,
+            content_type: None,
+            bytes: 100,
+            body: String::new(),
+        };
+        assert_eq!(
+            report.summary(),
+            "status=200 ok=true url=https://example.com ms=42 bytes=100"
+        );
+
+        report.status = None;
+        assert_eq!(
+            report.summary(),
+            "status=local ok=true url=https://example.com ms=42 bytes=100"
+        );
+    }
+
     const FIXTURE: &str = r#"
         <html>
         <head><title>Shop</title><style>.a{color:red}</style></head>
