@@ -1,3 +1,4 @@
+use std::hash::{BuildHasher, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -765,15 +766,45 @@ fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
             "output path has no file name",
         )
     })?;
-    let tmp = parent.join(format!(
-        ".{}.tmp.{}",
-        file_name.to_string_lossy(),
-        std::process::id()
-    ));
+
+    let mut tmp = None;
+    let mut file = None;
+
+    for _ in 0..10 {
+        let id = std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish();
+        let candidate = parent.join(format!(".{}.tmp.{:016x}", file_name.to_string_lossy(), id));
+
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(f) => {
+                tmp = Some(candidate);
+                file = Some(f);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+
+    let (tmp, file) = match (tmp, file) {
+        (Some(t), Some(f)) => (t, f),
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "too many temporary files exist",
+            ))
+        }
+    };
+
     let write = || -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(data)?;
-        file.sync_all()?;
+        let mut f = file;
+        f.write_all(data)?;
+        f.sync_all()?;
         Ok(())
     };
     if let Err(error) = write() {
