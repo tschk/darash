@@ -735,10 +735,7 @@ pub fn rows<'a>(html: &str, container: &str, spec: &'a str) -> Result<Vec<Vec<Fi
                     None => collapse_ws(found.text().collect::<String>().trim()),
                 })
                 .unwrap_or_default();
-            row.push(Field {
-                name,
-                value,
-            });
+            row.push(Field { name, value });
         }
         extracted.push(row);
     }
@@ -1233,10 +1230,7 @@ mod tests {
         let multiple = parse_row_spec("title=h1, url=a@href").expect("valid spec");
         assert_eq!(
             multiple,
-            vec![
-                ("title", "h1".to_owned()),
-                ("url", "a@href".to_owned())
-            ]
+            vec![("title", "h1".to_owned()), ("url", "a@href".to_owned())]
         );
 
         let with_whitespace =
@@ -1250,16 +1244,10 @@ mod tests {
         );
 
         let extraneous_commas = parse_row_spec("name=selector,, ,").expect("valid spec");
-        assert_eq!(
-            extraneous_commas,
-            vec![("name", "selector".to_owned())]
-        );
+        assert_eq!(extraneous_commas, vec![("name", "selector".to_owned())]);
 
         let multiple_equals = parse_row_spec("name=sel=ector").expect("valid spec");
-        assert_eq!(
-            multiple_equals,
-            vec![("name", "sel=ector".to_owned())]
-        );
+        assert_eq!(multiple_equals, vec![("name", "sel=ector".to_owned())]);
     }
 
     #[test]

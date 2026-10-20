@@ -15,11 +15,7 @@ fn bench_rows(c: &mut Criterion) {
     let mut group = c.benchmark_group("fetch");
     group.bench_function("rows", |b| {
         b.iter(|| {
-            black_box(fetch::rows(
-                &html,
-                ".item",
-                "title=h2, url=a@href, desc=p",
-            ).unwrap());
+            black_box(fetch::rows(&html, ".item", "title=h2, url=a@href, desc=p").unwrap());
         })
     });
     group.finish();
