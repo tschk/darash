@@ -666,7 +666,7 @@ fn table_from_element(table: scraper::ElementRef) -> Option<Table> {
 /// One named field extracted from a row container.
 #[derive(Clone, Debug, Serialize)]
 pub struct Field {
-    pub name: String,
+    pub name: std::sync::Arc<str>,
     pub value: String,
 }
 
@@ -718,7 +718,7 @@ pub fn rows(html: &str, container: &str, spec: &str) -> Result<Vec<Vec<Field>>, 
             let (selector, attr) = split_attr(selector);
             let selector = scraper::Selector::parse(&selector)
                 .map_err(|error| Error::InvalidSelector(format!("{selector:?}: {error}")))?;
-            Ok((name.clone(), selector, attr))
+            Ok((std::sync::Arc::from(name.as_str()), selector, attr))
         })
         .collect::<Result<Vec<_>, Error>>()?;
 
@@ -736,7 +736,7 @@ pub fn rows(html: &str, container: &str, spec: &str) -> Result<Vec<Vec<Field>>, 
                 })
                 .unwrap_or_default();
             row.push(Field {
-                name: name.clone(),
+                name: std::sync::Arc::clone(name),
                 value,
             });
         }
@@ -1219,7 +1219,7 @@ mod tests {
     fn rows_extract_named_fields_with_attributes() {
         let rows = rows(FIXTURE, ".item", "title=h2, url=a@href").expect("valid spec and selector");
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0][0].name, "title");
+        assert_eq!(rows[0][0].name.as_ref(), "title");
         assert_eq!(rows[0][0].value, "Alpha");
         assert_eq!(rows[0][1].value, "/alpha");
         assert_eq!(rows[1][1].value, "/beta");
