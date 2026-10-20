@@ -81,7 +81,6 @@ struct FetchArgs {
     basic_auth: Option<(String, String)>,
     head: bool,
     output: Option<PathBuf>,
-    insecure: bool,
     max_time: Option<Duration>,
     max_bytes: Option<usize>,
     fail: bool,
@@ -427,7 +426,6 @@ async fn fetch_report(
         headers: args.headers.clone(),
         body: args.data.clone(),
         basic_auth: args.basic_auth.clone(),
-        insecure: args.insecure,
         timeout: args.max_time,
         max_bytes: args.max_bytes,
     };
@@ -466,7 +464,6 @@ fn validate_page_options(args: &FetchArgs, extraction: Extraction) -> Result<(),
             || args.data.is_some()
             || args.basic_auth.is_some()
             || !args.headers.is_empty()
-            || args.insecure
         {
             return Err(
                 "--render supports unauthenticated GET only; custom request flags are unsupported"
@@ -876,7 +873,6 @@ fn parse_fetch_args(args: &[String]) -> Result<Option<FetchArgs>, String> {
                 "count" => parsed.count = true,
                 "json" => parsed.json = true,
                 "json-envelope" => parsed.json_envelope = true,
-                "insecure" => parsed.insecure = true,
                 "fail" => parsed.fail = true,
                 "head" => parsed.head = true,
                 "fresh" => parsed.fresh = true,
@@ -989,7 +985,6 @@ fn parse_fetch_args(args: &[String]) -> Result<Option<FetchArgs>, String> {
                         break;
                     }
                     'I' => parsed.head = true,
-                    'k' => parsed.insecure = true,
                     'f' => parsed.fail = true,
                     // Accepted no-ops: follow redirects, include headers, silent.
                     'L' | 'i' | 's' | 'S' => {}
@@ -1172,7 +1167,7 @@ fn usage() -> &'static str {
   darash fetch <url|file> [extraction] [curl options] [--json]
     extraction: --md | --text | --outline | --select CSS [--count] | --row spec | --table | --locate TEXT | --body
     request:    -X/--method M, -d/--data BODY|@FILE|@-, --data-raw B, --data-binary B, -u USER:PASS,
-                -I/--head, -k/--insecure, -m/--max-time SECS, --max-bytes N, --header 'Name: value'
+                -I/--head, -m/--max-time SECS, --max-bytes N, --header 'Name: value'
     output:     -o FILE, -f/--fail, --limit N, --budget N, --offset N, --where EXPR, --json, --json-envelope
     cache:      --fresh, --no-cache
     content:    --main-content (with --md/--text), --main-fallback full
@@ -1405,7 +1400,6 @@ mod tests {
             "a=1",
             "-u",
             "user:pass",
-            "-k",
             "-m",
             "5",
             "--max-bytes",
@@ -1419,7 +1413,6 @@ mod tests {
             fetch.basic_auth,
             Some(("user".to_owned(), "pass".to_owned()))
         );
-        assert!(fetch.insecure);
         assert_eq!(fetch.max_time, Some(Duration::from_secs(5)));
         assert_eq!(fetch.max_bytes, Some(100));
         assert_eq!(fetch.output, Some(PathBuf::from("out.bin")));

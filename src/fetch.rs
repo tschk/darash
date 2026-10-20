@@ -82,8 +82,6 @@ pub struct FetchOptions {
     pub body: Option<Vec<u8>>,
     /// HTTP basic auth `(user, password)`.
     pub basic_auth: Option<(String, String)>,
-    /// Accept invalid TLS certificates (curl's `-k`).
-    pub insecure: bool,
     /// Request timeout; `None` uses the 30-second default.
     pub timeout: Option<Duration>,
     /// Body cap; `None` uses [`FETCH_MAX_BODY_BYTES`].
@@ -149,7 +147,6 @@ pub async fn fetch_with(
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(options.timeout.unwrap_or(FETCH_TIMEOUT))
-        .danger_accept_invalid_certs(options.insecure)
         .build()
         .map_err(Error::ClientBuild)?;
 

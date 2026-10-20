@@ -9,7 +9,6 @@ fn existing_fetch_options_and_report_schema_remain_compatible() {
         headers: vec![],
         body: None,
         basic_auth: None,
-        insecure: false,
         timeout: None,
         max_bytes: None,
     };
