@@ -1,0 +1,29 @@
+--- src/fetch.rs
++++ src/fetch.rs
+@@ -666,7 +666,7 @@
+ /// One named field extracted from a row container.
+ #[derive(Clone, Debug, Serialize)]
+ pub struct Field {
+-    pub name: String,
++    pub name: std::sync::Arc<str>,
+     pub value: String,
+ }
+
+@@ -718,7 +718,7 @@
+             let (selector, attr) = split_attr(selector);
+             let selector = scraper::Selector::parse(&selector)
+                 .map_err(|error| Error::InvalidSelector(format!("{selector:?}: {error}")))?;
+-            Ok((name.clone(), selector, attr))
++            Ok((std::sync::Arc::from(name.as_str()), selector, attr))
+         })
+         .collect::<Result<Vec<_>, Error>>()?;
+
+@@ -736,7 +736,7 @@
+                 })
+                 .unwrap_or_default();
+             row.push(Field {
+-                name: name.clone(),
++                name: std::sync::Arc::clone(name),
+                 value,
+             });
+         }

@@ -517,7 +517,7 @@ fn build_records(
                         .collect::<Vec<_>>();
                     let mut object = serde_json::Map::new();
                     for field in &row {
-                        object.insert(field.name.clone(), json!(field.value));
+                        object.insert(field.name.to_string(), json!(field.value));
                     }
                     Record {
                         json: Value::Object(object),
