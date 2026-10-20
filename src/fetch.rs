@@ -1433,4 +1433,37 @@ mod tests {
         let past_empty = paginate(0, 5, 50);
         assert_eq!(past_empty.state, PageState::PastEnd);
     }
+
+    #[test]
+    fn fetch_report_summary_formats_correctly() {
+        let report_with_status = FetchReport {
+            status: Some(200),
+            ok: true,
+            url: "https://example.com/".to_owned(),
+            redirected: false,
+            ms: 42,
+            content_type: Some("text/html".to_owned()),
+            bytes: 1234,
+            body: "".to_owned(),
+        };
+        assert_eq!(
+            report_with_status.summary(),
+            "status=200 ok=true url=https://example.com/ ms=42 bytes=1234"
+        );
+
+        let report_without_status = FetchReport {
+            status: None,
+            ok: true,
+            url: "/local/file.txt".to_owned(),
+            redirected: false,
+            ms: 10,
+            content_type: None,
+            bytes: 5678,
+            body: "".to_owned(),
+        };
+        assert_eq!(
+            report_without_status.summary(),
+            "status=local ok=true url=/local/file.txt ms=10 bytes=5678"
+        );
+    }
 }
