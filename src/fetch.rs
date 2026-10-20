@@ -1406,6 +1406,42 @@ mod tests {
     }
 
     #[test]
+    fn fetch_report_summary_formats_http_status() {
+        let report = FetchReport {
+            status: Some(200),
+            ok: true,
+            url: "https://example.com/".to_owned(),
+            redirected: false,
+            ms: 150,
+            content_type: Some("text/html".to_owned()),
+            bytes: 1024,
+            body: "body".to_owned(),
+        };
+        assert_eq!(
+            report.summary(),
+            "status=200 ok=true url=https://example.com/ ms=150 bytes=1024"
+        );
+    }
+
+    #[test]
+    fn fetch_report_summary_formats_local_status() {
+        let report = FetchReport {
+            status: None,
+            ok: true,
+            url: "/tmp/local.html".to_owned(),
+            redirected: false,
+            ms: 5,
+            content_type: None,
+            bytes: 50,
+            body: "body".to_owned(),
+        };
+        assert_eq!(
+            report.summary(),
+            "status=local ok=true url=/tmp/local.html ms=5 bytes=50"
+        );
+    }
+
+    #[test]
     fn paginate_state_machine_covers_more_complete_and_past_end() {
         let more = paginate(100, 0, 50);
         assert_eq!(more.state, PageState::More);
