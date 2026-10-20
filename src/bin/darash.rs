@@ -164,26 +164,7 @@ async fn run_search(args: SearchArgs) -> Result<(), String> {
 
 async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     let extraction = pick_extraction(&args)?;
-    validate_page_options(&args, extraction)?;
-    let structured = matches!(
-        extraction,
-        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
-    );
-
-    if args.count && extraction != Extraction::Select {
-        return Err("--count requires --select".to_owned());
-    }
-    if !structured && (args.offset > 0 || args.json_envelope) {
-        return Err(
-            "--offset/--json-envelope apply to --select, --row, --table, or --locate".to_owned(),
-        );
-    }
-    if args.where_.is_some() && !matches!(extraction, Extraction::Row | Extraction::Table) {
-        return Err("--where applies to --row or --table output".to_owned());
-    }
-    if args.output.is_some() && !matches!(extraction, Extraction::Report | Extraction::Body) {
-        return Err("--output/-o applies only to the default report or --body".to_owned());
-    }
+    validate_fetch_options(&args, extraction)?;
 
     let is_url = args.input.starts_with("http://") || args.input.starts_with("https://");
     let method = args.method.clone().unwrap_or_else(|| "GET".to_owned());
@@ -217,79 +198,19 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         return Ok(fail_code(&args, &report));
     }
 
-    match extraction {
-        Extraction::Report => {
-            let rendered =
-                serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
-            println!("{rendered}");
-            return Ok(fail_code(&args, &report));
-        }
-        Extraction::Body => {
-            eprintln!("darash fetch: {}", report.summary());
-            println!("{}", report.body);
-            return Ok(fail_code(&args, &report));
-        }
-        Extraction::Markdown | Extraction::Text => {
-            let main = if args.main_content {
-                let fallback = if args.main_fallback_full {
-                    darash::main_content::MainContentFallback::FullDocument
-                } else {
-                    darash::main_content::MainContentFallback::Error
-                };
-                let content = darash::main_content::extract_main_content(&report.body, fallback)
-                    .map_err(|error| error.to_string())?;
-                eprintln!("darash fetch: content={:?}", content.source);
-                Some(content)
-            } else {
-                None
-            };
-            let html = main
-                .as_ref()
-                .map(|content| content.html.as_str())
-                .unwrap_or(&report.body);
-            let rendered = if extraction == Extraction::Markdown {
-                fetch::to_markdown(html)
-            } else {
-                fetch::to_text(html)
-            };
-            eprintln!("darash fetch: {}", report.summary());
-            emit_document(rendered, &report, args.budget, args.json);
-            return Ok(fail_code(&args, &report));
-        }
-        Extraction::Outline => {
-            let entries = fetch::outline(&report.body);
-            let items = entries
-                .iter()
-                .map(|entry| {
-                    format!(
-                        "{}\t{}\t{}",
-                        entry.selector,
-                        entry.count,
-                        entry.sample.as_deref().unwrap_or_default()
-                    )
-                })
-                .collect::<Vec<_>>();
-            let data = serde_json::to_value(&entries).map_err(|error| error.to_string())?;
-            let (limited, limit_omitted) = cap(items, args.limit.unwrap_or(DEFAULT_FETCH_LIMIT));
-            let budgeted = fetch::apply_budget(limited, args.budget);
-            let omitted = limit_omitted + budgeted.omitted;
-            eprintln!("darash fetch: {}", report.summary());
-            if omitted > 0 {
-                eprintln!(
-                    "darash fetch: {omitted} item(s) omitted; raise --limit/--budget or narrow the selector"
-                );
-            }
-            if args.json {
-                emit_json(data, &report, budgeted.items.len(), omitted);
-            } else {
-                emit_plain(&budgeted.items);
-            }
-            return Ok(fail_code(&args, &report));
-        }
-        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {}
+    if let Some(code) = print_report(&args, extraction, &report)? {
+        return Ok(code);
     }
 
-    let (records, headers, force_json) = build_records(extraction, &args, &report)?;
+    print_structured_records(&args, extraction, &report)
+}
+
+fn print_structured_records(
+    args: &FetchArgs,
+    extraction: Extraction,
+    report: &FetchReport,
+) -> Result<i32, String> {
+    let (records, headers, force_json) = build_records(extraction, args, report)?;
     if extraction == Extraction::Select && args.count {
         let selector = args.select.as_deref().unwrap_or_default();
         if records.is_empty() {
@@ -364,7 +285,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     } else if args.json {
         emit_json(
             data,
-            &report,
+            report,
             meta.returned,
             meta.total.saturating_sub(meta.returned),
         );
@@ -379,7 +300,85 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         }
         emit_plain(&budgeted.items);
     }
-    Ok(fail_code(&args, &report))
+    Ok(fail_code(args, report))
+}
+
+fn print_report(
+    args: &FetchArgs,
+    extraction: Extraction,
+    report: &FetchReport,
+) -> Result<Option<i32>, String> {
+    match extraction {
+        Extraction::Report => {
+            let rendered =
+                serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
+            println!("{rendered}");
+            Ok(Some(fail_code(args, report)))
+        }
+        Extraction::Body => {
+            eprintln!("darash fetch: {}", report.summary());
+            println!("{}", report.body);
+            Ok(Some(fail_code(args, report)))
+        }
+        Extraction::Markdown | Extraction::Text => {
+            let main = if args.main_content {
+                let fallback = if args.main_fallback_full {
+                    darash::main_content::MainContentFallback::FullDocument
+                } else {
+                    darash::main_content::MainContentFallback::Error
+                };
+                let content = darash::main_content::extract_main_content(&report.body, fallback)
+                    .map_err(|error| error.to_string())?;
+                eprintln!("darash fetch: content={:?}", content.source);
+                Some(content)
+            } else {
+                None
+            };
+            let html = main
+                .as_ref()
+                .map(|content| content.html.as_str())
+                .unwrap_or(&report.body);
+            let rendered = if extraction == Extraction::Markdown {
+                fetch::to_markdown(html)
+            } else {
+                fetch::to_text(html)
+            };
+            eprintln!("darash fetch: {}", report.summary());
+            emit_document(rendered, report, args.budget, args.json);
+            Ok(Some(fail_code(args, report)))
+        }
+        Extraction::Outline => {
+            let entries = fetch::outline(&report.body);
+            let items = entries
+                .iter()
+                .map(|entry| {
+                    format!(
+                        "{}\t{}\t{}",
+                        entry.selector,
+                        entry.count,
+                        entry.sample.as_deref().unwrap_or_default()
+                    )
+                })
+                .collect::<Vec<_>>();
+            let data = serde_json::to_value(&entries).map_err(|error| error.to_string())?;
+            let (limited, limit_omitted) = cap(items, args.limit.unwrap_or(DEFAULT_FETCH_LIMIT));
+            let budgeted = fetch::apply_budget(limited, args.budget);
+            let omitted = limit_omitted + budgeted.omitted;
+            eprintln!("darash fetch: {}", report.summary());
+            if omitted > 0 {
+                eprintln!(
+                    "darash fetch: {omitted} item(s) omitted; raise --limit/--budget or narrow the selector"
+                );
+            }
+            if args.json {
+                emit_json(data, report, budgeted.items.len(), omitted);
+            } else {
+                emit_plain(&budgeted.items);
+            }
+            Ok(Some(fail_code(args, report)))
+        }
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => Ok(None),
+    }
 }
 
 async fn fetch_report(
@@ -440,7 +439,27 @@ async fn fetch_report(
     Ok(report)
 }
 
-fn validate_page_options(args: &FetchArgs, extraction: Extraction) -> Result<(), String> {
+fn validate_fetch_options(args: &FetchArgs, extraction: Extraction) -> Result<(), String> {
+    let structured = matches!(
+        extraction,
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
+    );
+
+    if args.count && extraction != Extraction::Select {
+        return Err("--count requires --select".to_owned());
+    }
+    if !structured && (args.offset > 0 || args.json_envelope) {
+        return Err(
+            "--offset/--json-envelope apply to --select, --row, --table, or --locate".to_owned(),
+        );
+    }
+    if args.where_.is_some() && !matches!(extraction, Extraction::Row | Extraction::Table) {
+        return Err("--where applies to --row or --table output".to_owned());
+    }
+    if args.output.is_some() && !matches!(extraction, Extraction::Report | Extraction::Body) {
+        return Err("--output/-o applies only to the default report or --body".to_owned());
+    }
+
     if args.main_content && !matches!(extraction, Extraction::Markdown | Extraction::Text) {
         return Err("--main-content requires --md or --text".into());
     }
@@ -1214,14 +1233,14 @@ mod tests {
             "--main-fallback=full",
         ]);
         assert!(fetch.main_content && fetch.main_fallback_full);
-        assert!(validate_page_options(&fetch, pick_extraction(&fetch).unwrap()).is_ok());
+        assert!(validate_fetch_options(&fetch, pick_extraction(&fetch).unwrap()).is_ok());
         for list in [
             vec!["fetch", "page.html", "--main-content"],
             vec!["fetch", "page.html", "--md", "--main-fallback", "full"],
             vec!["fetch", "page.html", "--wait-for", "main"],
         ] {
             let fetch = fetch_args(&list);
-            assert!(validate_page_options(&fetch, pick_extraction(&fetch).unwrap()).is_err());
+            assert!(validate_fetch_options(&fetch, pick_extraction(&fetch).unwrap()).is_err());
         }
         assert!(parse_args(&args(&["fetch", "page.html", "--main-fallback", "auto"])).is_err());
     }
@@ -1230,7 +1249,7 @@ mod tests {
     fn browser_options_reject_local_files_and_request_credentials() {
         for input in ["page.html", "file:///tmp/page.html"] {
             let fetch = fetch_args(&["fetch", input, "--render", "--browser", "/chrome"]);
-            assert!(validate_page_options(&fetch, Extraction::Report)
+            assert!(validate_fetch_options(&fetch, Extraction::Report)
                 .unwrap_err()
                 .contains("HTTP(S)"));
         }
@@ -1243,7 +1262,7 @@ mod tests {
             "-u",
             "user:pass",
         ]);
-        assert!(validate_page_options(&fetch, Extraction::Report)
+        assert!(validate_fetch_options(&fetch, Extraction::Report)
             .unwrap_err()
             .contains("unauthenticated GET"));
         let fetch = fetch_args(&[
@@ -1256,11 +1275,11 @@ mod tests {
         ]);
         assert_eq!(fetch.wait_for.as_deref(), Some("main"));
         #[cfg(not(feature = "browser"))]
-        assert!(validate_page_options(&fetch, Extraction::Report)
+        assert!(validate_fetch_options(&fetch, Extraction::Report)
             .unwrap_err()
             .contains("browser feature"));
         #[cfg(feature = "browser")]
-        assert!(validate_page_options(&fetch, Extraction::Report).is_ok());
+        assert!(validate_fetch_options(&fetch, Extraction::Report).is_ok());
     }
 
     #[test]
