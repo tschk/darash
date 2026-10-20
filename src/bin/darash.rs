@@ -1086,6 +1086,21 @@ fn read_at_source(source: &str) -> Result<Vec<u8>, String> {
             .map_err(|error| format!("cannot read stdin: {error}"))?;
         return Ok(buffer);
     }
+
+    let path = Path::new(source);
+    if path.is_absolute() {
+        return Err(format!(
+            "absolute paths are not allowed for security reasons: {source}"
+        ));
+    }
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(format!(
+                "path traversal is not allowed for security reasons: {source}"
+            ));
+        }
+    }
+
     std::fs::read(source).map_err(|error| format!("cannot read {source}: {error}"))
 }
 
@@ -1448,6 +1463,16 @@ mod tests {
         let mut parsed = FetchArgs::default();
         add_data(&mut parsed, "@not-a-file", DataMode::Raw).expect("raw data");
         assert_eq!(parsed.data.as_deref(), Some(b"@not-a-file".as_slice()));
+    }
+
+    #[test]
+    fn add_data_rejects_absolute_paths_and_traversal() {
+        let mut parsed = FetchArgs::default();
+        let error = add_data(&mut parsed, "@/etc/passwd", DataMode::Strip).unwrap_err();
+        assert!(error.contains("absolute paths are not allowed"));
+
+        let error = add_data(&mut parsed, "@../passwd", DataMode::Binary).unwrap_err();
+        assert!(error.contains("path traversal is not allowed"));
     }
 
     #[test]
