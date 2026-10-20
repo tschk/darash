@@ -714,6 +714,19 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
+    fn test_browser_options_new_defaults() {
+        let options = BrowserOptions::new("my-browser");
+        assert_eq!(options.executable, PathBuf::from("my-browser"));
+        assert_eq!(options.timeout, Duration::from_secs(30));
+        assert_eq!(options.max_bytes, FETCH_MAX_BODY_BYTES);
+        assert_eq!(options.max_network_bytes, 8 * 1024 * 1024);
+        assert_eq!(options.max_requests, 128);
+        assert_eq!(options.max_navigations, 10);
+        assert_eq!(options.wait_for, None);
+        assert_eq!(options.settle_time, Duration::from_millis(250));
+    }
+
+    #[test]
     fn public_address_policy_rejects_special_use_and_mapped_addresses() {
         for ip in [
             "127.0.0.1",
