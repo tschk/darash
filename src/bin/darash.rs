@@ -165,25 +165,7 @@ async fn run_search(args: SearchArgs) -> Result<(), String> {
 async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     let extraction = pick_extraction(&args)?;
     validate_page_options(&args, extraction)?;
-    let structured = matches!(
-        extraction,
-        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
-    );
-
-    if args.count && extraction != Extraction::Select {
-        return Err("--count requires --select".to_owned());
-    }
-    if !structured && (args.offset > 0 || args.json_envelope) {
-        return Err(
-            "--offset/--json-envelope apply to --select, --row, --table, or --locate".to_owned(),
-        );
-    }
-    if args.where_.is_some() && !matches!(extraction, Extraction::Row | Extraction::Table) {
-        return Err("--where applies to --row or --table output".to_owned());
-    }
-    if args.output.is_some() && !matches!(extraction, Extraction::Report | Extraction::Body) {
-        return Err("--output/-o applies only to the default report or --body".to_owned());
-    }
+    validate_fetch_args(&args, extraction)?;
 
     let is_url = args.input.starts_with("http://") || args.input.starts_with("https://");
     let method = args.method.clone().unwrap_or_else(|| "GET".to_owned());
@@ -217,79 +199,77 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         return Ok(fail_code(&args, &report));
     }
 
-    match extraction {
-        Extraction::Report => {
-            let rendered =
-                serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
-            println!("{rendered}");
-            return Ok(fail_code(&args, &report));
-        }
-        Extraction::Body => {
-            eprintln!("darash fetch: {}", report.summary());
-            println!("{}", report.body);
-            return Ok(fail_code(&args, &report));
-        }
-        Extraction::Markdown | Extraction::Text => {
-            let main = if args.main_content {
-                let fallback = if args.main_fallback_full {
-                    darash::main_content::MainContentFallback::FullDocument
-                } else {
-                    darash::main_content::MainContentFallback::Error
-                };
-                let content = darash::main_content::extract_main_content(&report.body, fallback)
-                    .map_err(|error| error.to_string())?;
-                eprintln!("darash fetch: content={:?}", content.source);
-                Some(content)
-            } else {
-                None
-            };
-            let html = main
-                .as_ref()
-                .map(|content| content.html.as_str())
-                .unwrap_or(&report.body);
-            let rendered = if extraction == Extraction::Markdown {
-                fetch::to_markdown(html)
-            } else {
-                fetch::to_text(html)
-            };
-            eprintln!("darash fetch: {}", report.summary());
-            emit_document(rendered, &report, args.budget, args.json);
-            return Ok(fail_code(&args, &report));
-        }
-        Extraction::Outline => {
-            let entries = fetch::outline(&report.body);
-            let items = entries
-                .iter()
-                .map(|entry| {
-                    format!(
-                        "{}\t{}\t{}",
-                        entry.selector,
-                        entry.count,
-                        entry.sample.as_deref().unwrap_or_default()
-                    )
-                })
-                .collect::<Vec<_>>();
-            let data = serde_json::to_value(&entries).map_err(|error| error.to_string())?;
-            let (limited, limit_omitted) = cap(items, args.limit.unwrap_or(DEFAULT_FETCH_LIMIT));
-            let budgeted = fetch::apply_budget(limited, args.budget);
-            let omitted = limit_omitted + budgeted.omitted;
-            eprintln!("darash fetch: {}", report.summary());
-            if omitted > 0 {
-                eprintln!(
-                    "darash fetch: {omitted} item(s) omitted; raise --limit/--budget or narrow the selector"
-                );
-            }
-            if args.json {
-                emit_json(data, &report, budgeted.items.len(), omitted);
-            } else {
-                emit_plain(&budgeted.items);
-            }
-            return Ok(fail_code(&args, &report));
-        }
-        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {}
+    if let Some(code) = format_unstructured(extraction, &args, &report)? {
+        return Ok(code);
     }
 
-    let (records, headers, force_json) = build_records(extraction, &args, &report)?;
+    format_records(extraction, &args, &report)
+}
+
+async fn fetch_report(
+    args: &FetchArgs,
+    method: &str,
+    cacheable: bool,
+) -> Result<FetchReport, String> {
+    if args.render {
+        #[cfg(feature = "browser")]
+        {
+            let mut options = darash::browser::BrowserOptions::new(
+                args.browser
+                    .as_ref()
+                    .ok_or("--render requires --browser PATH")?,
+            );
+            if let Some(timeout) = args.max_time {
+                options.timeout = timeout;
+            }
+            if let Some(max_bytes) = args.max_bytes {
+                options.max_bytes = max_bytes;
+            }
+            options.wait_for = args.wait_for.clone();
+            return darash::browser::fetch_rendered(&args.input, &options)
+                .await
+                .map_err(|error| error.to_string());
+        }
+        #[cfg(not(feature = "browser"))]
+        return Err("--render requires a build with the browser feature (cargo install darash --features browser)".into());
+    }
+    if cacheable && !args.fresh {
+        if let Some((report, age)) = disk_cache::load(&args.input).await {
+            // A cached body larger than an explicit cap must not satisfy it.
+            let within_cap = args
+                .max_bytes
+                .map(|max| report.body.len() <= max)
+                .unwrap_or(true);
+            if within_cap {
+                eprintln!("using {age}s-old cached fetch (--fresh to refetch)");
+                return Ok(report);
+            }
+        }
+    }
+    let options = fetch::FetchOptions {
+        method: Some(method.to_owned()),
+        headers: args.headers.clone(),
+        body: args.data.clone(),
+        basic_auth: args.basic_auth.clone(),
+        insecure: args.insecure,
+        timeout: args.max_time,
+        max_bytes: args.max_bytes,
+    };
+    let report = fetch::fetch_with(&args.input, &options)
+        .await
+        .map_err(|error| error.to_string())?;
+    if cacheable {
+        let _ = disk_cache::store(&args.input, &report).await;
+    }
+    Ok(report)
+}
+
+fn format_records(
+    extraction: Extraction,
+    args: &FetchArgs,
+    report: &FetchReport,
+) -> Result<i32, String> {
+    let (records, headers, force_json) = build_records(extraction, args, report)?;
     if extraction == Extraction::Select && args.count {
         let selector = args.select.as_deref().unwrap_or_default();
         if records.is_empty() {
@@ -364,7 +344,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     } else if args.json {
         emit_json(
             data,
-            &report,
+            report,
             meta.returned,
             meta.total.saturating_sub(meta.returned),
         );
@@ -379,65 +359,108 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         }
         emit_plain(&budgeted.items);
     }
-    Ok(fail_code(&args, &report))
+    Ok(fail_code(args, report))
 }
 
-async fn fetch_report(
+fn format_unstructured(
+    extraction: Extraction,
     args: &FetchArgs,
-    method: &str,
-    cacheable: bool,
-) -> Result<FetchReport, String> {
-    if args.render {
-        #[cfg(feature = "browser")]
-        {
-            let mut options = darash::browser::BrowserOptions::new(
-                args.browser
-                    .as_ref()
-                    .ok_or("--render requires --browser PATH")?,
-            );
-            if let Some(timeout) = args.max_time {
-                options.timeout = timeout;
-            }
-            if let Some(max_bytes) = args.max_bytes {
-                options.max_bytes = max_bytes;
-            }
-            options.wait_for = args.wait_for.clone();
-            return darash::browser::fetch_rendered(&args.input, &options)
-                .await
-                .map_err(|error| error.to_string());
+    report: &FetchReport,
+) -> Result<Option<i32>, String> {
+    match extraction {
+        Extraction::Report => {
+            let rendered =
+                serde_json::to_string_pretty(report).map_err(|error| error.to_string())?;
+            println!("{rendered}");
+            Ok(Some(fail_code(args, report)))
         }
-        #[cfg(not(feature = "browser"))]
-        return Err("--render requires a build with the browser feature (cargo install darash --features browser)".into());
-    }
-    if cacheable && !args.fresh {
-        if let Some((report, age)) = disk_cache::load(&args.input).await {
-            // A cached body larger than an explicit cap must not satisfy it.
-            let within_cap = args
-                .max_bytes
-                .map(|max| report.body.len() <= max)
-                .unwrap_or(true);
-            if within_cap {
-                eprintln!("using {age}s-old cached fetch (--fresh to refetch)");
-                return Ok(report);
-            }
+        Extraction::Body => {
+            eprintln!("darash fetch: {}", report.summary());
+            println!("{}", report.body);
+            Ok(Some(fail_code(args, report)))
         }
+        Extraction::Markdown | Extraction::Text => {
+            let main = if args.main_content {
+                let fallback = if args.main_fallback_full {
+                    darash::main_content::MainContentFallback::FullDocument
+                } else {
+                    darash::main_content::MainContentFallback::Error
+                };
+                let content = darash::main_content::extract_main_content(&report.body, fallback)
+                    .map_err(|error| error.to_string())?;
+                eprintln!("darash fetch: content={:?}", content.source);
+                Some(content)
+            } else {
+                None
+            };
+            let html = main
+                .as_ref()
+                .map(|content| content.html.as_str())
+                .unwrap_or(&report.body);
+            let rendered = if extraction == Extraction::Markdown {
+                fetch::to_markdown(html)
+            } else {
+                fetch::to_text(html)
+            };
+            eprintln!("darash fetch: {}", report.summary());
+            emit_document(rendered, report, args.budget, args.json);
+            Ok(Some(fail_code(args, report)))
+        }
+        Extraction::Outline => {
+            let entries = fetch::outline(&report.body);
+            let items = entries
+                .iter()
+                .map(|entry| {
+                    format!(
+                        "{}\t{}\t{}",
+                        entry.selector,
+                        entry.count,
+                        entry.sample.as_deref().unwrap_or_default()
+                    )
+                })
+                .collect::<Vec<_>>();
+            let data = serde_json::to_value(&entries).map_err(|error| error.to_string())?;
+            let (limited, limit_omitted) = cap(items, args.limit.unwrap_or(DEFAULT_FETCH_LIMIT));
+            let budgeted = fetch::apply_budget(limited, args.budget);
+            let omitted = limit_omitted + budgeted.omitted;
+            eprintln!("darash fetch: {}", report.summary());
+            if omitted > 0 {
+                eprintln!(
+                    "darash fetch: {omitted} item(s) omitted; raise --limit/--budget or narrow the selector"
+                );
+            }
+            if args.json {
+                emit_json(data, report, budgeted.items.len(), omitted);
+            } else {
+                emit_plain(&budgeted.items);
+            }
+            Ok(Some(fail_code(args, report)))
+        }
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => Ok(None),
     }
-    let options = fetch::FetchOptions {
-        method: Some(method.to_owned()),
-        headers: args.headers.clone(),
-        body: args.data.clone(),
-        basic_auth: args.basic_auth.clone(),
-        insecure: args.insecure,
-        timeout: args.max_time,
-        max_bytes: args.max_bytes,
-    };
-    let report = fetch::fetch_with(&args.input, &options)
-        .await
-        .map_err(|error| error.to_string())?;
-    if cacheable {
-        let _ = disk_cache::store(&args.input, &report).await;
+}
+
+fn validate_fetch_args(args: &FetchArgs, extraction: Extraction) -> Result<(), String> {
+    let structured = matches!(
+        extraction,
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
+    );
+
+    if args.count && extraction != Extraction::Select {
+        return Err("--count requires --select".to_owned());
     }
-    Ok(report)
+    if !structured && (args.offset > 0 || args.json_envelope) {
+        return Err(
+            "--offset/--json-envelope apply to --select, --row, --table, or --locate".to_owned(),
+        );
+    }
+    if args.where_.is_some() && !matches!(extraction, Extraction::Row | Extraction::Table) {
+        return Err("--where applies to --row or --table output".to_owned());
+    }
+    if args.output.is_some() && !matches!(extraction, Extraction::Report | Extraction::Body) {
+        return Err("--output/-o applies only to the default report or --body".to_owned());
+    }
+    Ok(())
 }
 
 fn validate_page_options(args: &FetchArgs, extraction: Extraction) -> Result<(), String> {
