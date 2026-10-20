@@ -778,7 +778,11 @@ fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
             std::process::id(),
             timestamp
         ));
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+        {
             Ok(f) => {
                 file_opt = Some(f);
                 break;
