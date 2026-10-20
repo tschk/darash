@@ -765,18 +765,35 @@ fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
             "output path has no file name",
         )
     })?;
-    let tmp = parent.join(format!(
-        ".{}.tmp.{}",
-        file_name.to_string_lossy(),
-        std::process::id()
-    ));
-    let write = || -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&tmp)?;
+    let mut i = 0;
+    let (tmp, file) = loop {
+        let tmp = parent.join(format!(
+            ".{}.tmp.{:08x}",
+            file_name.to_string_lossy(),
+            fastrand::u32(..)
+        ));
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        match opts.open(&tmp) {
+            Ok(file) => break (tmp, file),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                i += 1;
+                if i >= 100 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        "failed to create a unique temporary file",
+                    ));
+                }
+            }
+            Err(e) => return Err(e),
+        }
+    };
+    let write = |mut file: std::fs::File| -> std::io::Result<()> {
         file.write_all(data)?;
         file.sync_all()?;
         Ok(())
     };
-    if let Err(error) = write() {
+    if let Err(error) = write(file) {
         let _ = std::fs::remove_file(&tmp);
         return Err(error);
     }
