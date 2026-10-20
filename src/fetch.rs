@@ -665,8 +665,8 @@ fn table_from_element(table: scraper::ElementRef) -> Option<Table> {
 
 /// One named field extracted from a row container.
 #[derive(Clone, Debug, Serialize)]
-pub struct Field {
-    pub name: String,
+pub struct Field<'a> {
+    pub name: &'a str,
     pub value: String,
 }
 
@@ -675,7 +675,7 @@ pub struct Field {
 /// Field selectors are relative to each row container. A selector may end with
 /// `@attr` to take an attribute value instead of text. Selectors cannot
 /// contain commas.
-pub fn parse_row_spec(spec: &str) -> Result<Vec<(String, String)>, Error> {
+pub fn parse_row_spec(spec: &str) -> Result<Vec<(&str, String)>, Error> {
     let mut fields = Vec::new();
     for part in spec.split(',') {
         let part = part.trim();
@@ -694,7 +694,7 @@ pub fn parse_row_spec(spec: &str) -> Result<Vec<(String, String)>, Error> {
                 "row field {part:?} needs both a name and a selector"
             )));
         }
-        fields.push((name.to_owned(), selector.to_owned()));
+        fields.push((name, selector.to_owned()));
     }
     if fields.is_empty() {
         return Err(Error::InvalidSelector(
@@ -708,7 +708,7 @@ pub fn parse_row_spec(spec: &str) -> Result<Vec<(String, String)>, Error> {
 ///
 /// `container` selects the repeating element (for example `.item`); each field
 /// from [`parse_row_spec`] is resolved inside it.
-pub fn rows(html: &str, container: &str, spec: &str) -> Result<Vec<Vec<Field>>, Error> {
+pub fn rows<'a>(html: &str, container: &str, spec: &'a str) -> Result<Vec<Vec<Field<'a>>>, Error> {
     let container_selector = scraper::Selector::parse(container)
         .map_err(|error| Error::InvalidSelector(format!("{container:?}: {error}")))?;
     let fields = parse_row_spec(spec)?;
@@ -718,7 +718,7 @@ pub fn rows(html: &str, container: &str, spec: &str) -> Result<Vec<Vec<Field>>, 
             let (selector, attr) = split_attr(selector);
             let selector = scraper::Selector::parse(&selector)
                 .map_err(|error| Error::InvalidSelector(format!("{selector:?}: {error}")))?;
-            Ok((name.clone(), selector, attr))
+            Ok((*name, selector, attr))
         })
         .collect::<Result<Vec<_>, Error>>()?;
 
@@ -736,7 +736,7 @@ pub fn rows(html: &str, container: &str, spec: &str) -> Result<Vec<Vec<Field>>, 
                 })
                 .unwrap_or_default();
             row.push(Field {
-                name: name.clone(),
+                name,
                 value,
             });
         }
@@ -1228,14 +1228,14 @@ mod tests {
     #[test]
     fn parse_row_spec_parses_valid_specs() {
         let single = parse_row_spec("name=selector").expect("valid spec");
-        assert_eq!(single, vec![("name".to_owned(), "selector".to_owned())]);
+        assert_eq!(single, vec![("name", "selector".to_owned())]);
 
         let multiple = parse_row_spec("title=h1, url=a@href").expect("valid spec");
         assert_eq!(
             multiple,
             vec![
-                ("title".to_owned(), "h1".to_owned()),
-                ("url".to_owned(), "a@href".to_owned())
+                ("title", "h1".to_owned()),
+                ("url", "a@href".to_owned())
             ]
         );
 
@@ -1244,21 +1244,21 @@ mod tests {
         assert_eq!(
             with_whitespace,
             vec![
-                ("name".to_owned(), "selector".to_owned()),
-                ("name2".to_owned(), "selector2".to_owned())
+                ("name", "selector".to_owned()),
+                ("name2", "selector2".to_owned())
             ]
         );
 
         let extraneous_commas = parse_row_spec("name=selector,, ,").expect("valid spec");
         assert_eq!(
             extraneous_commas,
-            vec![("name".to_owned(), "selector".to_owned())]
+            vec![("name", "selector".to_owned())]
         );
 
         let multiple_equals = parse_row_spec("name=sel=ector").expect("valid spec");
         assert_eq!(
             multiple_equals,
-            vec![("name".to_owned(), "sel=ector".to_owned())]
+            vec![("name", "sel=ector".to_owned())]
         );
     }
 

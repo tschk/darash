@@ -50,3 +50,7 @@ harness = false
 [[bench]]
 name = "blocklist"
 harness = false
+
+[[bench]]
+name = "bench_rows"
+harness = false

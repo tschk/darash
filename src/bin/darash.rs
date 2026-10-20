@@ -506,7 +506,7 @@ fn build_records(
             let headers = fetch::parse_row_spec(spec)
                 .map_err(|error| error.to_string())?
                 .into_iter()
-                .map(|(name, _)| name)
+                .map(|(name, _)| name.to_owned())
                 .collect::<Vec<_>>();
             let records = rows
                 .into_iter()
@@ -517,7 +517,7 @@ fn build_records(
                         .collect::<Vec<_>>();
                     let mut object = serde_json::Map::new();
                     for field in &row {
-                        object.insert(field.name.clone(), json!(field.value));
+                        object.insert(field.name.to_owned(), json!(field.value));
                     }
                     Record {
                         json: Value::Object(object),
