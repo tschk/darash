@@ -765,18 +765,41 @@ fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
             "output path has no file name",
         )
     })?;
-    let tmp = parent.join(format!(
-        ".{}.tmp.{}",
-        file_name.to_string_lossy(),
-        std::process::id()
-    ));
-    let write = || -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(data)?;
+    let mut tmp = PathBuf::new();
+    let mut file_opt = None;
+    for _ in 0..10 {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos();
+        tmp = parent.join(format!(
+            ".{}.tmp.{}.{}",
+            file_name.to_string_lossy(),
+            std::process::id(),
+            timestamp
+        ));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => {
+                file_opt = Some(f);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    let mut file = file_opt.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "failed to create temporary file after multiple attempts",
+        )
+    })?;
+
+    let write_res = (|| -> std::io::Result<()> {
+        std::io::Write::write_all(&mut file, data)?;
         file.sync_all()?;
         Ok(())
-    };
-    if let Err(error) = write() {
+    })();
+    if let Err(error) = write_res {
         let _ = std::fs::remove_file(&tmp);
         return Err(error);
     }
