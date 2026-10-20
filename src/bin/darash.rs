@@ -205,6 +205,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     let report = if is_url {
         fetch_report(&args, &method, cacheable).await?
     } else {
+        validate_local_path(&args.input)?;
         fetch::read_source(&args.input)
             .await
             .map_err(|error| error.to_string())?
@@ -1051,6 +1052,19 @@ fn next_value<'a>(args: &'a [String], index: &mut usize, flag: &str) -> Result<&
     Ok(value)
 }
 
+fn validate_local_path(path_str: &str) -> Result<(), String> {
+    let path = std::path::Path::new(path_str);
+    if path.is_absolute() {
+        return Err(format!("absolute paths are not allowed: {path_str}"));
+    }
+    for component in path.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(format!("directory traversal is not allowed: {path_str}"));
+        }
+    }
+    Ok(())
+}
+
 fn add_data(parsed: &mut FetchArgs, value: &str, mode: DataMode) -> Result<(), String> {
     let bytes = match mode {
         DataMode::Raw => value.as_bytes().to_vec(),
@@ -1086,6 +1100,7 @@ fn read_at_source(source: &str) -> Result<Vec<u8>, String> {
             .map_err(|error| format!("cannot read stdin: {error}"))?;
         return Ok(buffer);
     }
+    validate_local_path(source)?;
     std::fs::read(source).map_err(|error| format!("cannot read {source}: {error}"))
 }
 
@@ -1448,6 +1463,22 @@ mod tests {
         let mut parsed = FetchArgs::default();
         add_data(&mut parsed, "@not-a-file", DataMode::Raw).expect("raw data");
         assert_eq!(parsed.data.as_deref(), Some(b"@not-a-file".as_slice()));
+    }
+
+    #[test]
+    fn validate_local_path_rejects_absolute_and_traversal_paths() {
+        assert!(validate_local_path("safe.txt").is_ok());
+        assert!(validate_local_path("dir/safe.txt").is_ok());
+        assert!(validate_local_path("./safe.txt").is_ok());
+
+        let err = validate_local_path("/etc/passwd").unwrap_err();
+        assert!(err.contains("absolute paths are not allowed"));
+
+        let err = validate_local_path("../safe.txt").unwrap_err();
+        assert!(err.contains("directory traversal is not allowed"));
+
+        let err = validate_local_path("dir/../../safe.txt").unwrap_err();
+        assert!(err.contains("directory traversal is not allowed"));
     }
 
     #[test]
