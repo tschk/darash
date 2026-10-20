@@ -50,3 +50,12 @@ harness = false
 [[bench]]
 name = "blocklist"
 harness = false
+
+[[bench]]
+name = "canonicalize"
+harness = false
+
+
+[[bench]]
+name = "browser"
+harness = false

@@ -224,7 +224,8 @@ struct BrowserProcess {
 
 impl BrowserProcess {
     async fn launch(executable: &Path) -> Result<Self, BrowserError> {
-        let executable = std::fs::canonicalize(executable)
+        let executable = tokio::fs::canonicalize(executable)
+            .await
             .map_err(|error| BrowserError::Executable(error.to_string()))?;
         let version = Command::new(&executable)
             .arg("--version")
