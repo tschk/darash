@@ -88,6 +88,30 @@ criterion_group!(
     benches,
     bench_citation,
     bench_with_sources,
+    bench_apply_budget,
     bench_read_source
 );
 criterion_main!(benches);
+
+fn bench_apply_budget(c: &mut Criterion) {
+    let mut group = c.benchmark_group("apply_budget");
+    let items = vec![
+        "This is a short sentence.".to_string(),
+        "This is another short sentence.".to_string(),
+        "This is a slightly longer sentence, which might consume more tokens.".to_string(),
+        "Tokens are important to track, so this sentence is also quite long, but not too long."
+            .to_string(),
+        "A final sentence to fill out the budget allocation with a bit more length to it."
+            .to_string(),
+    ];
+    let budget = Some(15);
+
+    group.bench_function("apply_budget", |b| {
+        b.iter_batched(
+            || items.clone(),
+            |items| black_box(fetch::apply_budget(items, budget)),
+            criterion::BatchSize::SmallInput,
+        )
+    });
+    group.finish();
+}

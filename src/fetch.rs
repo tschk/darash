@@ -800,8 +800,8 @@ pub fn apply_budget(items: Vec<String>, budget: Option<usize>) -> Budgeted {
     let total = items.len();
     let mut kept = Vec::new();
     let mut used = 0usize;
-    for (index, item) in items.iter().enumerate() {
-        let cost = estimate_tokens(item);
+    for (index, item) in items.into_iter().enumerate() {
+        let cost = estimate_tokens(&item);
         if index > 0 && used + cost > budget {
             let omitted = total - kept.len();
             return Budgeted {
@@ -810,7 +810,7 @@ pub fn apply_budget(items: Vec<String>, budget: Option<usize>) -> Budgeted {
             };
         }
         used += cost;
-        kept.push(item.clone());
+        kept.push(item);
     }
     Budgeted {
         items: kept,
