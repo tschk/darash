@@ -149,47 +149,23 @@ fn tokenize(input: &str) -> Result<Vec<Token>, FilterError> {
             i = next;
             continue;
         }
-        match c {
-            '"' | '\'' => {
-                let (value, next) = lex_string(&chars, i, c)?;
-                tokens.push(Token::Str(value));
-                i = next;
-            }
-            '`' => {
-                let (value, next) = lex_backtick(&chars, i)?;
-                tokens.push(Token::Literal(value));
-                i = next;
-            }
-            '/' => {
-                let (pattern, flags, next) = lex_regex(&chars, i)?;
-                tokens.push(Token::Regex(pattern, flags));
-                i = next;
-            }
-            c if c.is_ascii_digit() => {
-                let (number, next) = lex_number(&chars, i)?;
-                tokens.push(Token::Number(number));
-                i = next;
-            }
+        let (token, next) = match c {
+            '"' | '\'' => lex_string(&chars, i, c)?,
+            '`' => lex_backtick(&chars, i)?,
+            '/' => lex_regex(&chars, i)?,
+            c if c.is_ascii_digit() => lex_number(&chars, i)?,
             '-' if chars
                 .get(i + 1)
                 .map(|n| n.is_ascii_digit())
                 .unwrap_or(false) =>
             {
-                let (number, next) = lex_number(&chars, i)?;
-                tokens.push(Token::Number(number));
-                i = next;
+                lex_number(&chars, i)?
             }
-            c if is_ident_start(c) => {
-                let (path, next) = lex_path(&chars, i)?;
-                match path.as_str() {
-                    "true" => tokens.push(Token::Bool(true)),
-                    "false" => tokens.push(Token::Bool(false)),
-                    _ => tokens.push(Token::Path(path)),
-                }
-                i = next;
-            }
+            c if is_ident_start(c) => lex_path(&chars, i)?,
             _ => return Err(FilterError::UnexpectedChar(c, i)),
-        }
+        };
+        tokens.push(token);
+        i = next;
     }
     Ok(tokens)
 }
@@ -247,13 +223,13 @@ fn lex_operator(chars: &[char], i: usize, c: char) -> Result<Option<(Token, usiz
     }
 }
 
-fn lex_string(chars: &[char], start: usize, quote: char) -> Result<(String, usize), FilterError> {
+fn lex_string(chars: &[char], start: usize, quote: char) -> Result<(Token, usize), FilterError> {
     let mut out = String::new();
     let mut i = start + 1;
     while i < chars.len() {
         let c = chars[i];
         if c == quote {
-            return Ok((out, i + 1));
+            return Ok((Token::Str(out), i + 1));
         }
         if c == '\\' {
             let Some(&next) = chars.get(i + 1) else {
@@ -278,13 +254,13 @@ fn lex_string(chars: &[char], start: usize, quote: char) -> Result<(String, usiz
     Err(FilterError::Unterminated("string"))
 }
 
-fn lex_backtick(chars: &[char], start: usize) -> Result<(String, usize), FilterError> {
+fn lex_backtick(chars: &[char], start: usize) -> Result<(Token, usize), FilterError> {
     let mut out = String::new();
     let mut i = start + 1;
     while i < chars.len() {
         let c = chars[i];
         if c == '`' {
-            return Ok((out, i + 1));
+            return Ok((Token::Literal(out), i + 1));
         }
         if c == '\\' && chars.get(i + 1) == Some(&'`') {
             out.push('`');
@@ -297,7 +273,7 @@ fn lex_backtick(chars: &[char], start: usize) -> Result<(String, usize), FilterE
     Err(FilterError::Unterminated("literal name"))
 }
 
-fn lex_regex(chars: &[char], start: usize) -> Result<(String, String, usize), FilterError> {
+fn lex_regex(chars: &[char], start: usize) -> Result<(Token, usize), FilterError> {
     let mut pattern = String::new();
     let mut i = start + 1;
     let mut closed = false;
@@ -336,10 +312,10 @@ fn lex_regex(chars: &[char], start: usize) -> Result<(String, String, usize), Fi
         flags.push(flag);
         i += 1;
     }
-    Ok((pattern, flags, i))
+    Ok((Token::Regex(pattern, flags), i))
 }
 
-fn lex_number(chars: &[char], start: usize) -> Result<(f64, usize), FilterError> {
+fn lex_number(chars: &[char], start: usize) -> Result<(Token, usize), FilterError> {
     let mut text = String::new();
     let mut i = start;
     if chars[i] == '-' {
@@ -365,11 +341,11 @@ fn lex_number(chars: &[char], start: usize) -> Result<(f64, usize), FilterError>
         }
     }
     text.parse::<f64>()
-        .map(|number| (number, i))
+        .map(|number| (Token::Number(number), i))
         .map_err(|_| FilterError::UnexpectedToken(text))
 }
 
-fn lex_path(chars: &[char], start: usize) -> Result<(String, usize), FilterError> {
+fn lex_path(chars: &[char], start: usize) -> Result<(Token, usize), FilterError> {
     let mut out = String::new();
     let mut i = start;
     while i < chars.len() && is_ident_continue(chars[i]) {
@@ -388,7 +364,12 @@ fn lex_path(chars: &[char], start: usize) -> Result<(String, usize), FilterError
             break;
         }
     }
-    Ok((out, i))
+    let token = match out.as_str() {
+        "true" => Token::Bool(true),
+        "false" => Token::Bool(false),
+        _ => Token::Path(out),
+    };
+    Ok((token, i))
 }
 
 fn is_ident_start(c: char) -> bool {
