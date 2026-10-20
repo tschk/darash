@@ -973,6 +973,13 @@ mod tests {
     use std::thread;
 
     #[test]
+    fn search_mode_as_str() {
+        assert_eq!(SearchMode::Speed.as_str(), "speed");
+        assert_eq!(SearchMode::Balanced.as_str(), "balanced");
+        assert_eq!(SearchMode::Quality.as_str(), "quality");
+    }
+
+    #[test]
     fn request_carries_mode_and_sources_into_searxng_query() {
         let request = SearchRequest::new("rust async")
             .with_mode(SearchMode::Quality)
