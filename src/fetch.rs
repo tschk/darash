@@ -1333,6 +1333,19 @@ mod tests {
         assert_eq!(estimate_tokens("abcde"), 2);
     }
 
+    #[test]
+    fn fetch_report_from_source_initializes_fields() {
+        let report = FetchReport::from_source("file:///local/path", "<html>Body</html>");
+        assert_eq!(report.status, None);
+        assert!(report.ok);
+        assert_eq!(report.url, "file:///local/path");
+        assert!(!report.redirected);
+        assert_eq!(report.ms, 0);
+        assert_eq!(report.content_type, None);
+        assert_eq!(report.bytes, 17);
+        assert_eq!(report.body, "<html>Body</html>");
+    }
+
     #[tokio::test]
     async fn local_reports_read_files_without_http() {
         let mut path = std::env::temp_dir();
