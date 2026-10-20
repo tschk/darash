@@ -149,49 +149,50 @@ fn tokenize(input: &str) -> Result<Vec<Token>, FilterError> {
             i = next;
             continue;
         }
-        match c {
-            '"' | '\'' => {
-                let (value, next) = lex_string(&chars, i, c)?;
-                tokens.push(Token::Str(value));
-                i = next;
-            }
-            '`' => {
-                let (value, next) = lex_backtick(&chars, i)?;
-                tokens.push(Token::Literal(value));
-                i = next;
-            }
-            '/' => {
-                let (pattern, flags, next) = lex_regex(&chars, i)?;
-                tokens.push(Token::Regex(pattern, flags));
-                i = next;
-            }
-            c if c.is_ascii_digit() => {
-                let (number, next) = lex_number(&chars, i)?;
-                tokens.push(Token::Number(number));
-                i = next;
-            }
-            '-' if chars
-                .get(i + 1)
-                .map(|n| n.is_ascii_digit())
-                .unwrap_or(false) =>
-            {
-                let (number, next) = lex_number(&chars, i)?;
-                tokens.push(Token::Number(number));
-                i = next;
-            }
-            c if is_ident_start(c) => {
-                let (path, next) = lex_path(&chars, i)?;
-                match path.as_str() {
-                    "true" => tokens.push(Token::Bool(true)),
-                    "false" => tokens.push(Token::Bool(false)),
-                    _ => tokens.push(Token::Path(path)),
-                }
-                i = next;
-            }
-            _ => return Err(FilterError::UnexpectedChar(c, i)),
-        }
+        let (token, next) = lex_primary(&chars, i, c)?;
+        tokens.push(token);
+        i = next;
     }
     Ok(tokens)
+}
+
+fn lex_primary(chars: &[char], i: usize, c: char) -> Result<(Token, usize), FilterError> {
+    match c {
+        '"' | '\'' => {
+            let (value, next) = lex_string(chars, i, c)?;
+            Ok((Token::Str(value), next))
+        }
+        '`' => {
+            let (value, next) = lex_backtick(chars, i)?;
+            Ok((Token::Literal(value), next))
+        }
+        '/' => {
+            let (pattern, flags, next) = lex_regex(chars, i)?;
+            Ok((Token::Regex(pattern, flags), next))
+        }
+        c if c.is_ascii_digit() => {
+            let (number, next) = lex_number(chars, i)?;
+            Ok((Token::Number(number), next))
+        }
+        '-' if chars
+            .get(i + 1)
+            .map(|n| n.is_ascii_digit())
+            .unwrap_or(false) =>
+        {
+            let (number, next) = lex_number(chars, i)?;
+            Ok((Token::Number(number), next))
+        }
+        c if is_ident_start(c) => {
+            let (path, next) = lex_path(chars, i)?;
+            let token = match path.as_str() {
+                "true" => Token::Bool(true),
+                "false" => Token::Bool(false),
+                _ => Token::Path(path),
+            };
+            Ok((token, next))
+        }
+        _ => Err(FilterError::UnexpectedChar(c, i)),
+    }
 }
 
 fn lex_operator(chars: &[char], i: usize, c: char) -> Result<Option<(Token, usize)>, FilterError> {
