@@ -411,58 +411,68 @@ fn render_inline_children(element: scraper::ElementRef, mode: RenderMode, out: &
 fn render_inline_node(name: &str, child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
     match name {
         "br" => out.push('\n'),
-        "strong" | "b" => {
-            let inner = render_inline(child, mode);
-            if mode == RenderMode::Markdown && !inner.trim().is_empty() {
-                out.push_str(&format!("**{}**", inner.trim()));
-            } else {
-                out.push_str(&inner);
-            }
-        }
-        "em" | "i" => {
-            let inner = render_inline(child, mode);
-            if mode == RenderMode::Markdown && !inner.trim().is_empty() {
-                out.push_str(&format!("*{}*", inner.trim()));
-            } else {
-                out.push_str(&inner);
-            }
-        }
-        "code" | "kbd" | "samp" => {
-            let inner = child.text().collect::<String>();
-            if mode == RenderMode::Markdown {
-                out.push_str(&format!("`{}`", inner.trim()));
-            } else {
-                out.push_str(inner.trim());
-            }
-        }
-        "img" => {
-            if mode == RenderMode::Markdown {
-                let alt = child.value().attr("alt").unwrap_or_default();
-                if let Some(src) = child.value().attr("src") {
-                    out.push_str(&format!("![{alt}]({src})"));
-                }
-            }
-        }
-        "a" => {
-            let inner = render_inline(child, mode);
-            let href = child.value().attr("href");
-            if mode == RenderMode::Markdown {
-                if let Some(href) = href {
-                    let label = if inner.trim().is_empty() {
-                        href
-                    } else {
-                        inner.trim()
-                    };
-                    out.push_str(&format!("[{label}]({href})"));
-                } else {
-                    out.push_str(&inner);
-                }
-            } else {
-                out.push_str(&inner);
-            }
-        }
+        "strong" | "b" => render_strong(child, mode, out),
+        "em" | "i" => render_emphasis(child, mode, out),
+        "code" | "kbd" | "samp" => render_code(child, mode, out),
+        "img" => render_image(child, mode, out),
+        "a" => render_link(child, mode, out),
         "p" | "div" | "li" | "section" | "article" => out.push(' '),
         _ => out.push_str(&render_inline(child, mode)),
+    }
+}
+
+fn render_strong(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let inner = render_inline(child, mode);
+    if mode == RenderMode::Markdown && !inner.trim().is_empty() {
+        out.push_str(&format!("**{}**", inner.trim()));
+    } else {
+        out.push_str(&inner);
+    }
+}
+
+fn render_emphasis(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let inner = render_inline(child, mode);
+    if mode == RenderMode::Markdown && !inner.trim().is_empty() {
+        out.push_str(&format!("*{}*", inner.trim()));
+    } else {
+        out.push_str(&inner);
+    }
+}
+
+fn render_code(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let inner = child.text().collect::<String>();
+    if mode == RenderMode::Markdown {
+        out.push_str(&format!("`{}`", inner.trim()));
+    } else {
+        out.push_str(inner.trim());
+    }
+}
+
+fn render_image(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    if mode == RenderMode::Markdown {
+        let alt = child.value().attr("alt").unwrap_or_default();
+        if let Some(src) = child.value().attr("src") {
+            out.push_str(&format!("![{alt}]({src})"));
+        }
+    }
+}
+
+fn render_link(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let inner = render_inline(child, mode);
+    let href = child.value().attr("href");
+    if mode == RenderMode::Markdown {
+        if let Some(href) = href {
+            let label = if inner.trim().is_empty() {
+                href
+            } else {
+                inner.trim()
+            };
+            out.push_str(&format!("[{label}]({href})"));
+        } else {
+            out.push_str(&inner);
+        }
+    } else {
+        out.push_str(&inner);
     }
 }
 
