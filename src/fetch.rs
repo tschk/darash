@@ -1083,14 +1083,15 @@ mod tests {
     }
 
     #[test]
-    fn to_markdown_exact_output() {
-        // Headings and paragraphs
+    fn to_markdown_exact_output_headings_and_paragraphs() {
         assert_eq!(
             to_markdown("<h1>Heading 1</h1><p>Paragraph text.</p><h2>Heading 2</h2>"),
             "# Heading 1\n\nParagraph text.\n\n## Heading 2\n"
         );
+    }
 
-        // Bold and italics
+    #[test]
+    fn to_markdown_exact_output_bold_and_italics() {
         assert_eq!(
             to_markdown("<p>This is <strong>bold</strong> and <em>italic</em>.</p>"),
             "This is **bold** and *italic*.\n"
@@ -1099,8 +1100,10 @@ mod tests {
             to_markdown("<p>This is <b>bold</b> and <i>italic</i>.</p>"),
             "This is **bold** and *italic*.\n"
         );
+    }
 
-        // Links
+    #[test]
+    fn to_markdown_exact_output_links() {
         assert_eq!(
             to_markdown("<a href=\"https://example.com\">Example</a>"),
             "[Example](https://example.com)\n"
@@ -1109,8 +1112,10 @@ mod tests {
             to_markdown("<a href=\"https://example.com\"></a>"),
             "[https://example.com](https://example.com)\n"
         );
+    }
 
-        // Code and Preformatted text
+    #[test]
+    fn to_markdown_exact_output_code_and_preformatted() {
         assert_eq!(
             to_markdown("<p>Use <code>cargo run</code></p>"),
             "Use `cargo run`\n"
@@ -1119,8 +1124,10 @@ mod tests {
             to_markdown("<pre>fn main() {\n    println!(\"Hello\");\n}</pre>"),
             "```\nfn main() {\n    println!(\"Hello\");\n}\n```\n"
         );
+    }
 
-        // Lists
+    #[test]
+    fn to_markdown_exact_output_lists() {
         assert_eq!(
             to_markdown("<ul><li>Item 1</li><li>Item 2</li></ul>"),
             "- Item 1\n- Item 2\n"
@@ -1129,23 +1136,31 @@ mod tests {
             to_markdown("<ol><li>First</li><li>Second</li></ol>"),
             "1. First\n2. Second\n"
         );
+    }
 
-        // Blockquotes
+    #[test]
+    fn to_markdown_exact_output_blockquotes() {
         assert_eq!(
             to_markdown("<blockquote><p>To be</p><p>or not to be</p></blockquote>"),
             "> To be\n> \n> or not to be\n"
         );
+    }
 
-        // Horizontal rules
+    #[test]
+    fn to_markdown_exact_output_horizontal_rules() {
         assert_eq!(to_markdown("<hr>"), "---\n");
+    }
 
-        // Ignored elements
+    #[test]
+    fn to_markdown_exact_output_ignored_elements() {
         assert_eq!(
             to_markdown("<script>alert(1);</script><style>body{}</style><p>Visible</p>"),
             "Visible\n"
         );
+    }
 
-        // Whitespace collapsing
+    #[test]
+    fn to_markdown_exact_output_whitespace_collapsing() {
         assert_eq!(
             to_markdown("<p>   Multiple    spaces\nand newlines   </p>"),
             "Multiple spaces and newlines\n"
