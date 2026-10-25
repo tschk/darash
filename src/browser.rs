@@ -781,9 +781,18 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
-            let (socket, _) = listener.accept().await.unwrap();
-            let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
-            let cancelled = socket.next().await.unwrap().unwrap();
+            let (socket, _) = listener
+                .accept()
+                .await
+                .expect("Failed to accept TCP connection");
+            let mut socket = tokio_tungstenite::accept_async(socket)
+                .await
+                .expect("Failed to accept WebSocket connection");
+            let cancelled = socket
+                .next()
+                .await
+                .expect("Failed to receive WebSocket message")
+                .expect("Failed to read WebSocket message");
             let cancelled: Value = serde_json::from_str(cancelled.to_text().unwrap()).unwrap();
             let awaited = socket.next().await.unwrap().unwrap();
             let awaited: Value = serde_json::from_str(awaited.to_text().unwrap()).unwrap();
