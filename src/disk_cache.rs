@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn bypass_rules_cover_methods_headers_bodies_and_no_store() {
+    fn bypass_rules_allow_caching_for_simple_get() {
         assert!(should_cache(
             "https://example.com/a",
             "GET",
@@ -241,6 +241,10 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn bypass_rules_reject_non_get_methods() {
         assert!(!should_cache(
             "https://example.com/a",
             "POST",
@@ -255,6 +259,10 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn bypass_rules_reject_custom_headers() {
         assert!(!should_cache(
             "https://example.com/a",
             "GET",
@@ -262,6 +270,10 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn bypass_rules_reject_request_bodies() {
         assert!(!should_cache(
             "https://example.com/a",
             "GET",
@@ -269,6 +281,10 @@ mod tests {
             true,
             false
         ));
+    }
+
+    #[test]
+    fn bypass_rules_reject_no_store_directive() {
         assert!(!should_cache(
             "https://example.com/a",
             "GET",
