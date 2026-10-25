@@ -779,7 +779,9 @@ mod tests {
     #[tokio::test]
     async fn review_regression_cdp_errors_are_correlated_to_awaited_call() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
+        let address = listener
+            .local_addr()
+            .expect("local address should be available on bound listener");
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
             let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
@@ -847,7 +849,9 @@ mod tests {
     impl Fixture {
         async fn start() -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let address = listener.local_addr().unwrap();
+            let address = listener
+                .local_addr()
+                .expect("local address should be available on bound listener");
             let requests = Arc::new(Mutex::new(Vec::new()));
             let captured = requests.clone();
             let task = tokio::spawn(async move {
