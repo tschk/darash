@@ -50,7 +50,3 @@ harness = false
 [[bench]]
 name = "blocklist"
 harness = false
-
-[[bench]]
-name = "record_gen"
-harness = false
