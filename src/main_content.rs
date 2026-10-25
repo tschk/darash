@@ -258,7 +258,7 @@ mod tests {
             "<article><header><h1>Title</h1></header><p>Short</p></article>",
             MainContentFallback::Error,
         )
-        .unwrap();
+        .expect("failed to extract main content");
         assert_eq!(article.source, MainContentSource::Article);
         assert!(article.html.contains("Title"));
         let prose = format!(
