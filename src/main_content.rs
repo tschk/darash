@@ -314,7 +314,7 @@ mod tests {
             let closing = landmark
                 .split_whitespace()
                 .next()
-                .expect("expected at least one token in landmark");
+                .expect("landmark string must not be empty");
             let html = format!(
                 "<form><{landmark}><h1>Guide</h1><p>Useful content</p><div role='search'>Search clutter</div></{closing}></form><form><input name='search'>Ordinary form</form>"
             );
@@ -372,7 +372,7 @@ mod tests {
             "More article context. ".repeat(10)
         );
         let content = extract_main_content(&html, MainContentFallback::Error)
-            .expect("expected valid main content");
+            .expect("expected valid semantic landmarks to qualify without error");
         assert_eq!(content.source, MainContentSource::Main);
         for text in ["Overview", "Detailed article", "Conclusion"] {
             assert!(content.html.contains(text));
