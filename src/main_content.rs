@@ -210,7 +210,8 @@ mod tests {
     #[test]
     fn landmarks_remove_clutter_and_preserve_article_structure() {
         let html = include_str!("../tests/fixtures/main-content.html");
-        let content = extract_main_content(html, MainContentFallback::Error).unwrap();
+        let content = extract_main_content(html, MainContentFallback::Error)
+            .expect("expected valid main content");
         assert_eq!(content.source, MainContentSource::Main);
         let markdown = to_markdown(&content.html);
         for preserved in [
@@ -246,7 +247,8 @@ mod tests {
     #[test]
     fn accessibility_landmarks_hidden_ancestors_and_ties() {
         let html = "<div hidden><main>Hidden main</main></div><div role='navigation'>Menu</div><div role='main'><h1>First</h1><p>Text</p></div><main><h1>Other</h1><p>Text</p></main>";
-        let content = extract_main_content(html, MainContentFallback::Error).unwrap();
+        let content = extract_main_content(html, MainContentFallback::Error)
+            .expect("expected valid main content");
         assert!(content.html.contains("First"));
         assert!(!content.html.contains("Hidden main"));
         assert!(!content.html.contains("Other"));
@@ -258,7 +260,7 @@ mod tests {
             "<article><header><h1>Title</h1></header><p>Short</p></article>",
             MainContentFallback::Error,
         )
-        .unwrap();
+        .expect("expected valid main content");
         assert_eq!(article.source, MainContentSource::Article);
         assert!(article.html.contains("Title"));
         let prose = format!(
@@ -268,7 +270,7 @@ mod tests {
         );
         assert_eq!(
             extract_main_content(&prose, MainContentFallback::Error)
-                .unwrap()
+                .expect("expected valid main content")
                 .source,
             MainContentSource::Prose
         );
@@ -278,7 +280,8 @@ mod tests {
     fn fallback_is_explicit_and_preserves_the_original_document() {
         for html in ["", "<nav>Only links</nav>", "<div>Small shell</div>"] {
             assert!(extract_main_content(html, MainContentFallback::Error).is_err());
-            let content = extract_main_content(html, MainContentFallback::FullDocument).unwrap();
+            let content = extract_main_content(html, MainContentFallback::FullDocument)
+                .expect("expected valid full document content");
             assert_eq!(content.source, MainContentSource::FullDocument);
             assert_eq!(content.html, html);
         }
@@ -293,7 +296,8 @@ mod tests {
             "The guide explains useful details with concrete examples. ".repeat(8),
             "The second paragraph adds context and practical steps. ".repeat(8)
         );
-        let content = extract_main_content(&html, MainContentFallback::Error).unwrap();
+        let content = extract_main_content(&html, MainContentFallback::Error)
+            .expect("expected valid main content");
         assert_eq!(content.source, MainContentSource::Prose);
         assert!(content.html.contains("Guide"));
         assert!(!content.html.contains("Sidebar"), "selected outer wrapper");
@@ -307,7 +311,10 @@ mod tests {
             ("div role='main'", MainContentSource::Main),
             ("div role='article'", MainContentSource::Article),
         ] {
-            let closing = landmark.split_whitespace().next().unwrap();
+            let closing = landmark
+                .split_whitespace()
+                .next()
+                .expect("expected at least one token in landmark");
             let html = format!(
                 "<form><{landmark}><h1>Guide</h1><p>Useful content</p><div role='search'>Search clutter</div></{closing}></form><form><input name='search'>Ordinary form</form>"
             );
@@ -364,7 +371,8 @@ mod tests {
             "Detailed article content. ".repeat(10),
             "More article context. ".repeat(10)
         );
-        let content = extract_main_content(&html, MainContentFallback::Error).unwrap();
+        let content = extract_main_content(&html, MainContentFallback::Error)
+            .expect("expected valid main content");
         assert_eq!(content.source, MainContentSource::Main);
         for text in ["Overview", "Detailed article", "Conclusion"] {
             assert!(content.html.contains(text));
@@ -384,7 +392,8 @@ mod tests {
             "Sidebar promotion. ".repeat(6),
             "Sidebar recommendation. ".repeat(6)
         );
-        let content = extract_main_content(&html, MainContentFallback::Error).unwrap();
+        let content = extract_main_content(&html, MainContentFallback::Error)
+            .expect("expected valid main content");
         assert_eq!(content.source, MainContentSource::Prose);
         let markdown = to_markdown(&content.html);
         assert!(markdown.contains("# Guide"));
