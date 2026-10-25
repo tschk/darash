@@ -144,7 +144,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, FilterError> {
             i += 1;
             continue;
         }
-        if let Some((token, next)) = lex_operator(&chars, i, c)? {
+        if let Some((token, next)) = lex_operator(&chars, i)? {
             tokens.push(token);
             i = next;
             continue;
@@ -195,55 +195,24 @@ fn lex_primary(chars: &[char], i: usize, c: char) -> Result<(Token, usize), Filt
     }
 }
 
-fn lex_operator(chars: &[char], i: usize, c: char) -> Result<Option<(Token, usize)>, FilterError> {
-    match c {
-        '|' => {
-            if chars.get(i + 1) == Some(&'|') {
-                Ok(Some((Token::Or, i + 2)))
-            } else {
-                Err(FilterError::UnexpectedChar(c, i))
-            }
-        }
-        '&' => {
-            if chars.get(i + 1) == Some(&'&') {
-                Ok(Some((Token::And, i + 2)))
-            } else {
-                Err(FilterError::UnexpectedChar(c, i))
-            }
-        }
-        '=' => {
-            if chars.get(i + 1) == Some(&'=') {
-                Ok(Some((Token::Eq, i + 2)))
-            } else {
-                Err(FilterError::UnexpectedChar(c, i))
-            }
-        }
-        '!' => {
-            if chars.get(i + 1) == Some(&'=') {
-                Ok(Some((Token::Ne, i + 2)))
-            } else if chars.get(i + 1) == Some(&'~') {
-                Ok(Some((Token::NotMatch, i + 2)))
-            } else {
-                Ok(Some((Token::Not, i + 1)))
-            }
-        }
-        '~' => Ok(Some((Token::Match, i + 1))),
-        '>' => {
-            if chars.get(i + 1) == Some(&'=') {
-                Ok(Some((Token::Ge, i + 2)))
-            } else {
-                Ok(Some((Token::Gt, i + 1)))
-            }
-        }
-        '<' => {
-            if chars.get(i + 1) == Some(&'=') {
-                Ok(Some((Token::Le, i + 2)))
-            } else {
-                Ok(Some((Token::Lt, i + 1)))
-            }
-        }
-        '(' => Ok(Some((Token::LParen, i + 1))),
-        ')' => Ok(Some((Token::RParen, i + 1))),
+fn lex_operator(chars: &[char], i: usize) -> Result<Option<(Token, usize)>, FilterError> {
+    match &chars[i..] {
+        ['|', '|', ..] => Ok(Some((Token::Or, i + 2))),
+        ['|', ..] => Err(FilterError::UnexpectedChar('|', i)),
+        ['&', '&', ..] => Ok(Some((Token::And, i + 2))),
+        ['&', ..] => Err(FilterError::UnexpectedChar('&', i)),
+        ['=', '=', ..] => Ok(Some((Token::Eq, i + 2))),
+        ['=', ..] => Err(FilterError::UnexpectedChar('=', i)),
+        ['!', '=', ..] => Ok(Some((Token::Ne, i + 2))),
+        ['!', '~', ..] => Ok(Some((Token::NotMatch, i + 2))),
+        ['!', ..] => Ok(Some((Token::Not, i + 1))),
+        ['~', ..] => Ok(Some((Token::Match, i + 1))),
+        ['>', '=', ..] => Ok(Some((Token::Ge, i + 2))),
+        ['>', ..] => Ok(Some((Token::Gt, i + 1))),
+        ['<', '=', ..] => Ok(Some((Token::Le, i + 2))),
+        ['<', ..] => Ok(Some((Token::Lt, i + 1))),
+        ['(', ..] => Ok(Some((Token::LParen, i + 1))),
+        [')', ..] => Ok(Some((Token::RParen, i + 1))),
         _ => Ok(None),
     }
 }
