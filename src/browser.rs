@@ -797,7 +797,9 @@ mod tests {
 
     #[tokio::test]
     async fn review_regression_cdp_errors_are_correlated_to_awaited_call() {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Failed to bind TCP listener");
         let address = listener.local_addr().expect("Failed to get local address");
         let server = tokio::spawn(async move {
             let (socket, _) = listener
