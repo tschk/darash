@@ -508,6 +508,11 @@ fn build_records(
                 .into_iter()
                 .map(|(name, _)| name)
                 .collect::<Vec<_>>();
+            let mut template = serde_json::Map::new();
+            for header in &headers {
+                template.insert(header.clone(), Value::Null);
+            }
+
             let records = rows
                 .into_iter()
                 .map(|row| {
@@ -515,9 +520,11 @@ fn build_records(
                         .iter()
                         .map(|field| field.value.clone())
                         .collect::<Vec<_>>();
-                    let mut object = serde_json::Map::new();
+                    let mut object = template.clone();
                     for field in &row {
-                        object.insert(field.name.clone(), json!(field.value));
+                        if let Some(val) = object.get_mut(&field.name) {
+                            *val = json!(field.value);
+                        }
                     }
                     Record {
                         json: Value::Object(object),
@@ -534,17 +541,21 @@ fn build_records(
                 1 => {
                     let table = tables.into_iter().next().expect("one table");
                     let headers = table.headers.clone();
+                    let mut template = serde_json::Map::new();
+                    for header in &headers {
+                        template.insert(header.clone(), Value::Null);
+                    }
+
                     let records = table
                         .rows
                         .into_iter()
                         .map(|row| {
                             let cells = row.clone();
-                            let mut object = serde_json::Map::new();
+                            let mut object = template.clone();
                             for (index, header) in headers.iter().enumerate() {
-                                object.insert(
-                                    header.clone(),
-                                    json!(row.get(index).cloned().unwrap_or_default()),
-                                );
+                                if let Some(val) = object.get_mut(header) {
+                                    *val = json!(row.get(index).cloned().unwrap_or_default());
+                                }
                             }
                             Record {
                                 json: Value::Object(object),
