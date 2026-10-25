@@ -258,7 +258,7 @@ mod tests {
             "<article><header><h1>Title</h1></header><p>Short</p></article>",
             MainContentFallback::Error,
         )
-        .unwrap();
+        .expect("expected valid article selection");
         assert_eq!(article.source, MainContentSource::Article);
         assert!(article.html.contains("Title"));
         let prose = format!(
@@ -268,7 +268,7 @@ mod tests {
         );
         assert_eq!(
             extract_main_content(&prose, MainContentFallback::Error)
-                .unwrap()
+                .expect("expected valid prose selection")
                 .source,
             MainContentSource::Prose
         );
