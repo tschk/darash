@@ -1,4 +1,3 @@
-use darash::StringErrorExt;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -1175,6 +1174,16 @@ fn print_usage() {
         "{} (search defaults to the in-process Darash backend; fetch reports every request)",
         usage()
     );
+}
+
+trait StringErrorExt<T> {
+    fn string_err(self) -> Result<T, String>;
+}
+
+impl<T, E: std::fmt::Display> StringErrorExt<T> for Result<T, E> {
+    fn string_err(self) -> Result<T, String> {
+        self.map_err(|e| e.to_string())
+    }
 }
 
 #[cfg(test)]

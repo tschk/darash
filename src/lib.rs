@@ -965,7 +965,7 @@ pub enum Error {
     SourceRead(String),
 }
 
-pub trait StringErrorExt<T> {
+pub(crate) trait StringErrorExt<T> {
     fn string_err(self) -> Result<T, String>;
 }
 
