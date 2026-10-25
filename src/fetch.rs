@@ -642,11 +642,21 @@ fn table_from_element(table: scraper::ElementRef) -> Option<Table> {
     let mut rows: Vec<Vec<String>> = Vec::new();
 
     for row in table.select(&row_selector) {
-        let cells: Vec<String> = row
-            .child_elements()
-            .filter(|cell| matches!(cell.value().name(), "td" | "th"))
-            .map(|cell| collapse_ws(cell.text().collect::<String>().trim()))
-            .collect();
+        let iterator = row.child_elements()
+            .filter(|cell| matches!(cell.value().name(), "td" | "th"));
+
+        let mut cells = if !headers.is_empty() {
+            Vec::with_capacity(headers.len())
+        } else {
+            // estimate size of header row based on child count
+            let (lower, upper) = iterator.size_hint();
+            Vec::with_capacity(upper.unwrap_or(lower))
+        };
+
+        cells.extend(
+            iterator.map(|cell| collapse_ws(cell.text().collect::<String>().trim()))
+        );
+
         if cells.is_empty() {
             continue;
         }
