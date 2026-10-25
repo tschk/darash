@@ -1196,7 +1196,7 @@ mod tests {
     #[test]
     fn search_config_builder_methods_populate_fields() {
         let config = SearchConfig::new("https://example.com")
-            .unwrap()
+            .expect("valid endpoint")
             .with_blocklist(["badsite.com", "spam.org"])
             .with_allowlist(["goodsite.com"])
             .with_timeout(std::time::Duration::from_secs(10))
