@@ -246,7 +246,8 @@ mod tests {
     #[test]
     fn accessibility_landmarks_hidden_ancestors_and_ties() {
         let html = "<div hidden><main>Hidden main</main></div><div role='navigation'>Menu</div><div role='main'><h1>First</h1><p>Text</p></div><main><h1>Other</h1><p>Text</p></main>";
-        let content = extract_main_content(html, MainContentFallback::Error).unwrap();
+        let content = extract_main_content(html, MainContentFallback::Error)
+            .expect("expected valid main content");
         assert!(content.html.contains("First"));
         assert!(!content.html.contains("Hidden main"));
         assert!(!content.html.contains("Other"));
