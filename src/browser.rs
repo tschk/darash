@@ -754,10 +754,16 @@ mod tests {
             "2002:7f00:1::",
             "3fff::1",
         ] {
-            assert!(!is_public(ip.parse().unwrap()), "accepted {ip}");
+            assert!(
+                !is_public(ip.parse().expect("valid IP address parsing")),
+                "accepted {ip}"
+            );
         }
         for ip in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
-            assert!(is_public(ip.parse().unwrap()), "rejected {ip}");
+            assert!(
+                is_public(ip.parse().expect("valid IP address parsing")),
+                "rejected {ip}"
+            );
         }
     }
 
