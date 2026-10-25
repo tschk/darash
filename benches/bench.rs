@@ -88,6 +88,105 @@ criterion_group!(
     benches,
     bench_citation,
     bench_with_sources,
-    bench_read_source
+    bench_read_source,
+    bench_abstract_text
 );
 criterion_main!(benches);
+
+// Added benchmark for abstract_text
+// Need a copy of the old abstract_text to compare against new
+fn abstract_text_old(index: Option<std::collections::HashMap<String, Vec<usize>>>) -> String {
+    const MAX_ABSTRACT_ENTRIES: usize = 256;
+    const MAX_ABSTRACT_POSITIONS: usize = 512;
+    const MAX_ABSTRACT_WORDS: usize = 48;
+
+    let index = index.unwrap_or_default();
+    let mut words = Vec::new();
+    for (word, positions) in index.iter().take(MAX_ABSTRACT_ENTRIES) {
+        for &position in positions
+            .iter()
+            .take(MAX_ABSTRACT_POSITIONS.saturating_sub(words.len()))
+        {
+            words.push((position, word.as_str()));
+            if words.len() >= MAX_ABSTRACT_POSITIONS {
+                break;
+            }
+        }
+        if words.len() >= MAX_ABSTRACT_POSITIONS {
+            break;
+        }
+    }
+    words.sort_unstable_by_key(|(position, _)| *position);
+    let mut iter = words
+        .into_iter()
+        .take(MAX_ABSTRACT_WORDS)
+        .map(|(_, word)| word);
+    match iter.next() {
+        Some(first) => iter.fold(first.to_owned(), |mut acc, word| {
+            acc.push(' ');
+            acc.push_str(word);
+            acc
+        }),
+        None => String::new(),
+    }
+}
+
+// Optimized abstract_text (using Vec::join)
+fn abstract_text_new(index: Option<std::collections::HashMap<String, Vec<usize>>>) -> String {
+    const MAX_ABSTRACT_ENTRIES: usize = 256;
+    const MAX_ABSTRACT_POSITIONS: usize = 512;
+    const MAX_ABSTRACT_WORDS: usize = 48;
+
+    let index = index.unwrap_or_default();
+    let mut words = Vec::new();
+    for (word, positions) in index.iter().take(MAX_ABSTRACT_ENTRIES) {
+        for &position in positions
+            .iter()
+            .take(MAX_ABSTRACT_POSITIONS.saturating_sub(words.len()))
+        {
+            words.push((position, word.as_str()));
+            if words.len() >= MAX_ABSTRACT_POSITIONS {
+                break;
+            }
+        }
+        if words.len() >= MAX_ABSTRACT_POSITIONS {
+            break;
+        }
+    }
+    words.sort_unstable_by_key(|(position, _)| *position);
+
+    words
+        .into_iter()
+        .take(MAX_ABSTRACT_WORDS)
+        .map(|(_, word)| word)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn bench_abstract_text(c: &mut Criterion) {
+    let mut index = std::collections::HashMap::new();
+    for i in 0..100 {
+        index.insert(format!("word_that_is_quite_long_{}", i), vec![i]);
+    }
+    let opt_index = Some(index);
+
+    let mut group = c.benchmark_group("abstract_text");
+
+    group.bench_function("old", |b| {
+        b.iter_batched(
+            || opt_index.clone(),
+            |idx| black_box(abstract_text_old(idx)),
+            criterion::BatchSize::SmallInput,
+        )
+    });
+
+    group.bench_function("new", |b| {
+        b.iter_batched(
+            || opt_index.clone(),
+            |idx| black_box(abstract_text_new(idx)),
+            criterion::BatchSize::SmallInput,
+        )
+    });
+
+    group.finish();
+}
