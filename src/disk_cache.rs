@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn bypass_rules_cover_methods_headers_bodies_and_no_store() {
+    fn should_cache_get_without_extras() {
         assert!(should_cache(
             "https://example.com/a",
             "GET",
@@ -241,6 +241,10 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn should_not_cache_post_method() {
         assert!(!should_cache(
             "https://example.com/a",
             "POST",
@@ -248,6 +252,10 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn should_not_cache_head_method() {
         assert!(!should_cache(
             "https://example.com/a",
             "HEAD",
@@ -255,6 +263,10 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn should_not_cache_with_custom_headers() {
         assert!(!should_cache(
             "https://example.com/a",
             "GET",
@@ -262,6 +274,10 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn should_not_cache_with_request_body() {
         assert!(!should_cache(
             "https://example.com/a",
             "GET",
@@ -269,6 +285,10 @@ mod tests {
             true,
             false
         ));
+    }
+
+    #[test]
+    fn should_not_cache_with_no_store_directive() {
         assert!(!should_cache(
             "https://example.com/a",
             "GET",
