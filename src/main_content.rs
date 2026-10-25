@@ -364,7 +364,8 @@ mod tests {
             "Detailed article content. ".repeat(10),
             "More article context. ".repeat(10)
         );
-        let content = extract_main_content(&html, MainContentFallback::Error).unwrap();
+        let content = extract_main_content(&html, MainContentFallback::Error)
+            .expect("valid main content expected from structured test HTML");
         assert_eq!(content.source, MainContentSource::Main);
         for text in ["Overview", "Detailed article", "Conclusion"] {
             assert!(content.html.contains(text));
