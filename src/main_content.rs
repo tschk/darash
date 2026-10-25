@@ -278,7 +278,8 @@ mod tests {
     fn fallback_is_explicit_and_preserves_the_original_document() {
         for html in ["", "<nav>Only links</nav>", "<div>Small shell</div>"] {
             assert!(extract_main_content(html, MainContentFallback::Error).is_err());
-            let content = extract_main_content(html, MainContentFallback::FullDocument).unwrap();
+            let content = extract_main_content(html, MainContentFallback::FullDocument)
+                .expect("fallback to full document should succeed");
             assert_eq!(content.source, MainContentSource::FullDocument);
             assert_eq!(content.html, html);
         }
