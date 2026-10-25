@@ -782,8 +782,14 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
-            let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
-            let cancelled = socket.next().await.unwrap().unwrap();
+            let mut socket = tokio_tungstenite::accept_async(socket)
+                .await
+                .expect("failed to accept websocket connection");
+            let cancelled = socket
+                .next()
+                .await
+                .expect("expected stream item")
+                .expect("expected valid websocket message");
             let cancelled: Value = serde_json::from_str(cancelled.to_text().unwrap()).unwrap();
             let awaited = socket.next().await.unwrap().unwrap();
             let awaited: Value = serde_json::from_str(awaited.to_text().unwrap()).unwrap();
