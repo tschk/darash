@@ -1,12 +1,3 @@
-pub trait MapErrToString<T> {
-    fn map_err_to_string(self) -> Result<T, String>;
-}
-
-impl<T, E: std::string::ToString> MapErrToString<T> for Result<T, E> {
-    fn map_err_to_string(self) -> Result<T, String> {
-        self.map_err(|e| e.to_string())
-    }
-}
 use std::time::Duration;
 
 #[cfg(feature = "client")]
@@ -1624,5 +1615,15 @@ mod tests {
             String::from_utf8(request).expect("HTTP request is UTF-8")
         });
         (format!("http://{address}"), handle)
+    }
+}
+
+pub trait MapErrToString<T> {
+    fn map_err_to_string(self) -> Result<T, String>;
+}
+
+impl<T, E: std::string::ToString> MapErrToString<T> for Result<T, E> {
+    fn map_err_to_string(self) -> Result<T, String> {
+        self.map_err(|e| e.to_string())
     }
 }
