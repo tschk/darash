@@ -1454,6 +1454,22 @@ mod tests {
     }
 
     #[test]
+    fn fetch_report_from_source_initializes_correctly() {
+        let source = "test_source.html";
+        let body = "<h1>Hello, test!</h1>";
+        let report = FetchReport::from_source(source, body);
+
+        assert_eq!(report.status, None);
+        assert!(report.ok);
+        assert_eq!(report.url, source);
+        assert!(!report.redirected);
+        assert_eq!(report.ms, 0);
+        assert_eq!(report.content_type, None);
+        assert_eq!(report.bytes, body.len());
+        assert_eq!(report.body, body);
+    }
+
+    #[test]
     fn paginate_state_machine_covers_more_complete_and_past_end() {
         let more = paginate(100, 0, 50);
         assert_eq!(more.state, PageState::More);
