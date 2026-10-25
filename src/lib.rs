@@ -1059,6 +1059,13 @@ mod tests {
     }
 
     #[test]
+    fn search_mode_as_str_returns_expected_values() {
+        assert_eq!(SearchMode::Speed.as_str(), "speed");
+        assert_eq!(SearchMode::Balanced.as_str(), "balanced");
+        assert_eq!(SearchMode::Quality.as_str(), "quality");
+    }
+
+    #[test]
     fn search_modes_expose_retrieval_limits() {
         assert_eq!(SearchMode::Speed.provider_limit(), 1);
         assert_eq!(SearchMode::Speed.provider_concurrency(), 1);
