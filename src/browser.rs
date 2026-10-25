@@ -784,9 +784,11 @@ mod tests {
             let (socket, _) = listener.accept().await.unwrap();
             let mut socket = tokio_tungstenite::accept_async(socket).await.unwrap();
             let cancelled = socket.next().await.unwrap().unwrap();
-            let cancelled: Value = serde_json::from_str(cancelled.to_text().unwrap()).unwrap();
+            let cancelled: Value =
+                serde_json::from_str(cancelled.to_text().expect("text")).expect("json");
             let awaited = socket.next().await.unwrap().unwrap();
-            let awaited: Value = serde_json::from_str(awaited.to_text().unwrap()).unwrap();
+            let awaited: Value =
+                serde_json::from_str(awaited.to_text().expect("text")).expect("json");
             for reply in [
                 json!({"id":cancelled["id"],"error":{"message":"Invalid InterceptionId"}}),
                 json!({"id":awaited["id"],"result":{"ready":true}}),
@@ -797,7 +799,8 @@ mod tests {
                     .unwrap();
             }
             let failed = socket.next().await.unwrap().unwrap();
-            let failed: Value = serde_json::from_str(failed.to_text().unwrap()).unwrap();
+            let failed: Value =
+                serde_json::from_str(failed.to_text().expect("text")).expect("json");
             socket
                 .send(Message::Text(
                     json!({"id":failed["id"],"error":{"message":"Actual call failure"}})
