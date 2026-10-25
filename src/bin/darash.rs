@@ -534,17 +534,20 @@ fn build_records(
                 1 => {
                     let table = tables.into_iter().next().expect("one table");
                     let headers = table.headers.clone();
+                    let mut template = serde_json::Map::new();
+                    for header in &headers {
+                        template.insert(header.clone(), Value::Null);
+                    }
                     let records = table
                         .rows
                         .into_iter()
                         .map(|row| {
                             let cells = row.clone();
-                            let mut object = serde_json::Map::new();
+                            let mut object = template.clone();
                             for (index, header) in headers.iter().enumerate() {
-                                object.insert(
-                                    header.clone(),
-                                    json!(row.get(index).cloned().unwrap_or_default()),
-                                );
+                                if let Some(val) = object.get_mut(header) {
+                                    *val = json!(row.get(index).cloned().unwrap_or_default());
+                                }
                             }
                             Record {
                                 json: Value::Object(object),
