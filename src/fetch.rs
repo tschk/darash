@@ -1333,6 +1333,54 @@ mod tests {
         assert_eq!(estimate_tokens("abcde"), 2);
     }
 
+    #[test]
+    fn fetch_report_summary_formats_correctly() {
+        let local_report = FetchReport {
+            status: None,
+            ok: true,
+            url: "file.html".to_string(),
+            redirected: false,
+            ms: 0,
+            content_type: None,
+            bytes: 14,
+            body: "<h1>Local</h1>".to_string(),
+        };
+        assert_eq!(
+            local_report.summary(),
+            "status=local ok=true url=file.html ms=0 bytes=14"
+        );
+
+        let http_report = FetchReport {
+            status: Some(200),
+            ok: true,
+            url: "https://example.com".to_string(),
+            redirected: true,
+            ms: 150,
+            content_type: Some("text/html".to_string()),
+            bytes: 1024,
+            body: "<html>...</html>".to_string(),
+        };
+        assert_eq!(
+            http_report.summary(),
+            "status=200 ok=true url=https://example.com ms=150 bytes=1024"
+        );
+
+        let error_report = FetchReport {
+            status: Some(404),
+            ok: false,
+            url: "https://example.com/notfound".to_string(),
+            redirected: false,
+            ms: 45,
+            content_type: None,
+            bytes: 0,
+            body: "".to_string(),
+        };
+        assert_eq!(
+            error_report.summary(),
+            "status=404 ok=false url=https://example.com/notfound ms=45 bytes=0"
+        );
+    }
+
     #[tokio::test]
     async fn local_reports_read_files_without_http() {
         let mut path = std::env::temp_dir();
