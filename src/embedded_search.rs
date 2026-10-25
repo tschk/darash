@@ -1,3 +1,4 @@
+use crate::MapErrToString;
 use crate::{
     Error, ProviderStatus, SafeSearch, SearchConfig, SearchQuery, SearchResponse, SearchResult,
     SearchSource, TimeRange,
@@ -239,8 +240,7 @@ async fn fetch_openalex(
 }
 
 fn parse_openalex(body: &str, provider: SearchSource) -> Result<Vec<SearchResult>, String> {
-    let response: OpenAlexResponse =
-        serde_json::from_str(body).map_err(|error| error.to_string())?;
+    let response: OpenAlexResponse = serde_json::from_str(body).map_err_to_string()?;
     Ok(response
         .results
         .into_iter()
@@ -288,8 +288,7 @@ async fn fetch_hacker_news(
 }
 
 fn parse_hacker_news(body: &str, provider: SearchSource) -> Result<Vec<SearchResult>, String> {
-    let response: HackerNewsResponse =
-        serde_json::from_str(body).map_err(|error| error.to_string())?;
+    let response: HackerNewsResponse = serde_json::from_str(body).map_err_to_string()?;
     Ok(response
         .hits
         .into_iter()
@@ -311,28 +310,24 @@ fn parse_hacker_news(body: &str, provider: SearchSource) -> Result<Vec<SearchRes
 }
 
 fn duckduckgo_post(form: &str) -> Result<String, String> {
-    let connector = TlsConnector::new().map_err(|error| error.to_string())?;
-    let stream = TcpStream::connect((DUCKDUCKGO_HOST, 443)).map_err(|error| error.to_string())?;
+    let connector = TlsConnector::new().map_err_to_string()?;
+    let stream = TcpStream::connect((DUCKDUCKGO_HOST, 443)).map_err_to_string()?;
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
-        .map_err(|error| error.to_string())?;
+        .map_err_to_string()?;
     stream
         .set_write_timeout(Some(Duration::from_secs(15)))
-        .map_err(|error| error.to_string())?;
+        .map_err_to_string()?;
     let mut stream = connector
         .connect(DUCKDUCKGO_HOST, stream)
-        .map_err(|error| error.to_string())?;
+        .map_err_to_string()?;
     let request = format!(
         "POST /html/ HTTP/1.1\r\nHost: {DUCKDUCKGO_HOST}\r\nUser-Agent: {USER_AGENT}\r\nAccept: text/html\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{form}",
         form.len()
     );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|error| error.to_string())?;
+    stream.write_all(request.as_bytes()).map_err_to_string()?;
     let mut buf = Vec::new();
-    stream
-        .read_to_end(&mut buf)
-        .map_err(|error| error.to_string())?;
+    stream.read_to_end(&mut buf).map_err_to_string()?;
     if buf.len() > crate::MAX_RESPONSE_BYTES + 16 * 1024 {
         return Err("search response exceeded the byte limit".to_owned());
     }
@@ -340,7 +335,7 @@ fn duckduckgo_post(form: &str) -> Result<String, String> {
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
         .ok_or_else(|| "invalid HTTP response".to_owned())?;
-    let headers = std::str::from_utf8(&buf[..header_end]).map_err(|error| error.to_string())?;
+    let headers = std::str::from_utf8(&buf[..header_end]).map_err_to_string()?;
     let status_line = headers.lines().next().unwrap_or_default();
     if !status_line.contains(" 200 ") {
         return Err(format!("provider request failed: {}", status_line.trim()));
@@ -349,7 +344,7 @@ fn duckduckgo_post(form: &str) -> Result<String, String> {
     if body.len() > crate::MAX_RESPONSE_BYTES {
         return Err("search response exceeded the byte limit".to_owned());
     }
-    String::from_utf8(body).map_err(|error| error.to_string())
+    String::from_utf8(body).map_err_to_string()
 }
 
 fn decode_http_body(headers: &str, body: &[u8]) -> Result<Vec<u8>, String> {
@@ -367,9 +362,8 @@ fn decode_http_body(headers: &str, body: &[u8]) -> Result<Vec<u8>, String> {
             .windows(2)
             .position(|window| window == b"\r\n")
             .ok_or_else(|| "invalid chunked encoding".to_owned())?;
-        let size_line = std::str::from_utf8(&rest[..split]).map_err(|error| error.to_string())?;
-        let size =
-            usize::from_str_radix(size_line.trim(), 16).map_err(|error| error.to_string())?;
+        let size_line = std::str::from_utf8(&rest[..split]).map_err_to_string()?;
+        let size = usize::from_str_radix(size_line.trim(), 16).map_err_to_string()?;
         rest = &rest[split + 2..];
         if size == 0 {
             break;
@@ -392,11 +386,11 @@ async fn get_body(client: &Client, url: &str) -> Result<String, String> {
         .header(reqwest::header::USER_AGENT, USER_AGENT)
         .send()
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err_to_string()?;
     let status = response.status();
     let body = super::read_response_body(response)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err_to_string()?;
     // html.duckduckgo.com returns HTTP 202 + a bot-challenge page (no results)
     // for some TLS stacks; treat that as a failed fetch, not empty success.
     if !status.is_success() || status == reqwest::StatusCode::ACCEPTED {
@@ -420,7 +414,7 @@ fn validate_page(query: &SearchQuery) -> Result<(), Error> {
 fn page_offset(query: &SearchQuery) -> Result<u32, String> {
     query
         .page_offset(RESULTS_PER_PROVIDER as u32)
-        .map_err(|error| error.to_string())
+        .map_err_to_string()
 }
 
 fn duckduckgo_params(query: &SearchQuery) -> Result<String, String> {
@@ -481,10 +475,10 @@ fn duckduckgo_time_range(time_range: TimeRange) -> &'static str {
 
 fn parse_duckduckgo(body: &str, provider: SearchSource) -> Result<Vec<SearchResult>, String> {
     let document = Html::parse_document(body);
-    let result_selector = Selector::parse("div.result").map_err(|error| error.to_string())?;
-    let title_selector = Selector::parse("a.result__a").map_err(|error| error.to_string())?;
-    let snippet_selector = Selector::parse("a.result__snippet, div.result__snippet")
-        .map_err(|error| error.to_string())?;
+    let result_selector = Selector::parse("div.result").map_err_to_string()?;
+    let title_selector = Selector::parse("a.result__a").map_err_to_string()?;
+    let snippet_selector =
+        Selector::parse("a.result__snippet, div.result__snippet").map_err_to_string()?;
     Ok(document
         .select(&result_selector)
         .filter_map(|result_element| {
