@@ -775,7 +775,7 @@ pub struct SearchFilters {
     pub no_providers_selected: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct SearchResponse {
     #[serde(default)]
     pub query: String,
@@ -813,7 +813,7 @@ impl SearchResponse {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct SearchResult {
     #[serde(default)]
     pub title: String,
@@ -895,7 +895,7 @@ impl SearchResult {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Citation {
     pub title: String,
     pub url: String,
@@ -1103,8 +1103,7 @@ mod tests {
             title: "Backend source".to_owned(),
             url: "https://example.com".to_owned(),
             snippet: "source".to_owned(),
-            source: None,
-            published_date: None,
+            ..Default::default()
         };
         let response = |count| SearchResponse {
             query: "rust".to_owned(),
@@ -1113,21 +1112,11 @@ mod tests {
                 .map(|index| SearchResult {
                     title: index.to_string(),
                     url: format!("https://example.com/{index}"),
-                    content: String::new(),
-                    engine: None,
-                    engines: Vec::new(),
-                    category: None,
-                    published_date: None,
-                    score: None,
+                    ..Default::default()
                 })
                 .collect(),
-            answers: Vec::new(),
-            answer: None,
             sources: vec![source.clone(); count as usize],
-            corrections: Vec::new(),
-            suggestions: Vec::new(),
-            provider_status: Vec::new(),
-            filters: SearchFilters::default(),
+            ..Default::default()
         };
 
         for (mode, limit) in [
@@ -1216,30 +1205,16 @@ mod tests {
                     title: "ok".to_owned(),
                     url: "https://example.com/rust".to_owned(),
                     content: "guide".to_owned(),
-                    engine: None,
-                    engines: Vec::new(),
-                    category: None,
-                    published_date: None,
-                    score: None,
+                    ..Default::default()
                 },
                 SearchResult {
                     title: "bad".to_owned(),
                     url: "javascript:alert(1)".to_owned(),
                     content: "xss".to_owned(),
-                    engine: None,
-                    engines: Vec::new(),
-                    category: None,
-                    published_date: None,
-                    score: None,
+                    ..Default::default()
                 },
             ],
-            answers: Vec::new(),
-            answer: None,
-            sources: Vec::new(),
-            corrections: Vec::new(),
-            suggestions: Vec::new(),
-            provider_status: Vec::new(),
-            filters: SearchFilters::default(),
+            ..Default::default()
         };
         retain_http_results(&mut response);
         assert_eq!(response.results.len(), 1);
@@ -1517,15 +1492,7 @@ mod tests {
 
         let dummy_response = SearchResponse {
             query: "rust".to_owned(),
-            number_of_results: 0,
-            results: Vec::new(),
-            answers: Vec::new(),
-            answer: None,
-            sources: Vec::new(),
-            corrections: Vec::new(),
-            suggestions: Vec::new(),
-            provider_status: Vec::new(),
-            filters: SearchFilters::default(),
+            ..Default::default()
         };
 
         client.cache.insert(
