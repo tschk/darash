@@ -311,7 +311,8 @@ mod tests {
             ("div role='main'", MainContentSource::Main),
             ("div role='article'", MainContentSource::Article),
         ] {
-            let closing = landmark.split_whitespace()
+            let closing = landmark
+                .split_whitespace()
                 .next()
                 .expect("landmark string must not be empty");
             let html = format!(
