@@ -965,6 +965,16 @@ pub enum Error {
     SourceRead(String),
 }
 
+pub trait StringErrorExt<T> {
+    fn string_err(self) -> Result<T, String>;
+}
+
+impl<T, E: std::fmt::Display> StringErrorExt<T> for Result<T, E> {
+    fn string_err(self) -> Result<T, String> {
+        self.map_err(|e| e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1615,15 +1625,5 @@ mod tests {
             String::from_utf8(request).expect("HTTP request is UTF-8")
         });
         (format!("http://{address}"), handle)
-    }
-}
-
-pub trait StringErrorExt<T> {
-    fn string_err(self) -> Result<T, String>;
-}
-
-impl<T, E: std::fmt::Display> StringErrorExt<T> for Result<T, E> {
-    fn string_err(self) -> Result<T, String> {
-        self.map_err(|e| e.to_string())
     }
 }
