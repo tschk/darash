@@ -1,3 +1,4 @@
+use std::hash::{BuildHasher, Hasher};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -765,15 +766,45 @@ fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
             "output path has no file name",
         )
     })?;
-    let tmp = parent.join(format!(
-        ".{}.tmp.{}",
-        file_name.to_string_lossy(),
-        std::process::id()
-    ));
+
+    let mut tmp = None;
+    let mut file = None;
+
+    for _ in 0..10 {
+        let id = std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish();
+        let candidate = parent.join(format!(".{}.tmp.{:016x}", file_name.to_string_lossy(), id));
+
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(f) => {
+                tmp = Some(candidate);
+                file = Some(f);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+
+    let (tmp, file) = match (tmp, file) {
+        (Some(t), Some(f)) => (t, f),
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "too many temporary files exist",
+            ))
+        }
+    };
+
     let write = || -> std::io::Result<()> {
-        let mut file = std::fs::File::create(&tmp)?;
-        file.write_all(data)?;
-        file.sync_all()?;
+        let mut f = file;
+        f.write_all(data)?;
+        f.sync_all()?;
         Ok(())
     };
     if let Err(error) = write() {
@@ -1474,5 +1505,18 @@ mod tests {
     fn fold_tsv_flattens_scalars() {
         assert_eq!(fold_tsv("a\tb\nc"), "a b c");
         assert_eq!(fold_tsv("plain"), "plain");
+    }
+
+    #[test]
+    fn atomic_write_replaces_file_and_leaves_no_temp_files() {
+        let dir = std::env::temp_dir().join(format!("darash-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let path = dir.join("out.txt");
+        atomic_write(&path, b"first").expect("first write");
+        atomic_write(&path, b"second").expect("overwrite");
+        assert_eq!(std::fs::read(&path).expect("read output"), b"second");
+        let entries = std::fs::read_dir(&dir).expect("list dir").count();
+        std::fs::remove_dir_all(&dir).expect("clean up");
+        assert_eq!(entries, 1, "temporary files left behind");
     }
 }

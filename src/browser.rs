@@ -714,6 +714,19 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
+    fn browser_options_new_defaults() {
+        let options = BrowserOptions::new("/path/to/executable");
+        assert_eq!(options.executable, PathBuf::from("/path/to/executable"));
+        assert_eq!(options.timeout, Duration::from_secs(30));
+        assert_eq!(options.max_bytes, FETCH_MAX_BODY_BYTES);
+        assert_eq!(options.max_network_bytes, 8 * 1024 * 1024);
+        assert_eq!(options.max_requests, 128);
+        assert_eq!(options.max_navigations, 10);
+        assert_eq!(options.wait_for, None);
+        assert_eq!(options.settle_time, Duration::from_millis(250));
+    }
+
+    #[test]
     fn public_address_policy_rejects_special_use_and_mapped_addresses() {
         for ip in [
             "127.0.0.1",
@@ -741,10 +754,16 @@ mod tests {
             "2002:7f00:1::",
             "3fff::1",
         ] {
-            assert!(!is_public(ip.parse().unwrap()), "accepted {ip}");
+            assert!(
+                !is_public(ip.parse().expect("valid IP address parsing")),
+                "accepted {ip}"
+            );
         }
         for ip in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
-            assert!(is_public(ip.parse().unwrap()), "rejected {ip}");
+            assert!(
+                is_public(ip.parse().expect("valid IP address parsing")),
+                "rejected {ip}"
+            );
         }
     }
 
@@ -779,7 +798,7 @@ mod tests {
     #[tokio::test]
     async fn review_regression_cdp_errors_are_correlated_to_awaited_call() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
+        let address = listener.local_addr().expect("Failed to get local address");
         let server = tokio::spawn(async move {
             let (socket, _) = listener
                 .accept()
@@ -793,9 +812,13 @@ mod tests {
                 .await
                 .expect("Failed to receive WebSocket message")
                 .expect("Failed to read WebSocket message");
-            let cancelled: Value = serde_json::from_str(cancelled.to_text().unwrap()).unwrap();
+            let cancelled: Value =
+                serde_json::from_str(cancelled.to_text().expect("Message is not text"))
+                    .expect("Failed to parse JSON");
             let awaited = socket.next().await.unwrap().unwrap();
-            let awaited: Value = serde_json::from_str(awaited.to_text().unwrap()).unwrap();
+            let awaited: Value =
+                serde_json::from_str(awaited.to_text().expect("Message is not text"))
+                    .expect("Failed to parse JSON");
             for reply in [
                 json!({"id":cancelled["id"],"error":{"message":"Invalid InterceptionId"}}),
                 json!({"id":awaited["id"],"result":{"ready":true}}),
@@ -806,7 +829,9 @@ mod tests {
                     .unwrap();
             }
             let failed = socket.next().await.unwrap().unwrap();
-            let failed: Value = serde_json::from_str(failed.to_text().unwrap()).unwrap();
+            let failed: Value =
+                serde_json::from_str(failed.to_text().expect("Message is not text"))
+                    .expect("Failed to parse JSON");
             socket
                 .send(Message::Text(
                     json!({"id":failed["id"],"error":{"message":"Actual call failure"}})
@@ -856,7 +881,7 @@ mod tests {
     impl Fixture {
         async fn start() -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let address = listener.local_addr().unwrap();
+            let address = listener.local_addr().expect("Failed to get local address");
             let requests = Arc::new(Mutex::new(Vec::new()));
             let captured = requests.clone();
             let task = tokio::spawn(async move {

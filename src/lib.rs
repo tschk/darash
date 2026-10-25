@@ -1012,6 +1012,13 @@ mod tests {
     }
 
     #[test]
+    fn search_source_name_is_correct() {
+        assert_eq!(SearchSource::Web.name(), "duckduckgo");
+        assert_eq!(SearchSource::Academic.name(), "openalex");
+        assert_eq!(SearchSource::Discussions.name(), "hacker-news");
+    }
+
+    #[test]
     fn time_range_as_str_and_value_are_correct() {
         assert_eq!(TimeRange::Day.as_str(), "day");
         assert_eq!(TimeRange::Week.as_str(), "week");
@@ -1056,6 +1063,13 @@ mod tests {
             oversized.page_offset(10),
             Err(Error::PageOverflow)
         ));
+    }
+
+    #[test]
+    fn search_mode_as_str_returns_expected_values() {
+        assert_eq!(SearchMode::Speed.as_str(), "speed");
+        assert_eq!(SearchMode::Balanced.as_str(), "balanced");
+        assert_eq!(SearchMode::Quality.as_str(), "quality");
     }
 
     #[test]
@@ -1182,7 +1196,7 @@ mod tests {
     #[test]
     fn search_config_builder_methods_populate_fields() {
         let config = SearchConfig::new("https://example.com")
-            .unwrap()
+            .expect("valid endpoint")
             .with_blocklist(["badsite.com", "spam.org"])
             .with_allowlist(["goodsite.com"])
             .with_timeout(std::time::Duration::from_secs(10))

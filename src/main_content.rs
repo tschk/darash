@@ -307,7 +307,10 @@ mod tests {
             ("div role='main'", MainContentSource::Main),
             ("div role='article'", MainContentSource::Article),
         ] {
-            let closing = landmark.split_whitespace().next().unwrap();
+            let closing = landmark
+                .split_whitespace()
+                .next()
+                .expect("landmark string must not be empty");
             let html = format!(
                 "<form><{landmark}><h1>Guide</h1><p>Useful content</p><div role='search'>Search clutter</div></{closing}></form><form><input name='search'>Ordinary form</form>"
             );
@@ -364,7 +367,8 @@ mod tests {
             "Detailed article content. ".repeat(10),
             "More article context. ".repeat(10)
         );
-        let content = extract_main_content(&html, MainContentFallback::Error).unwrap();
+        let content = extract_main_content(&html, MainContentFallback::Error)
+            .expect("expected valid semantic landmarks to qualify without error");
         assert_eq!(content.source, MainContentSource::Main);
         for text in ["Overview", "Detailed article", "Conclusion"] {
             assert!(content.html.contains(text));
