@@ -1012,6 +1012,13 @@ mod tests {
     }
 
     #[test]
+    fn search_source_name_is_correct() {
+        assert_eq!(SearchSource::Web.name(), "duckduckgo");
+        assert_eq!(SearchSource::Academic.name(), "openalex");
+        assert_eq!(SearchSource::Discussions.name(), "hacker-news");
+    }
+
+    #[test]
     fn time_range_as_str_and_value_are_correct() {
         assert_eq!(TimeRange::Day.as_str(), "day");
         assert_eq!(TimeRange::Week.as_str(), "week");
