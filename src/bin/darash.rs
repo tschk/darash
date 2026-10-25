@@ -1506,4 +1506,17 @@ mod tests {
         assert_eq!(fold_tsv("a\tb\nc"), "a b c");
         assert_eq!(fold_tsv("plain"), "plain");
     }
+
+    #[test]
+    fn atomic_write_replaces_file_and_leaves_no_temp_files() {
+        let dir = std::env::temp_dir().join(format!("darash-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        let path = dir.join("out.txt");
+        atomic_write(&path, b"first").expect("first write");
+        atomic_write(&path, b"second").expect("overwrite");
+        assert_eq!(std::fs::read(&path).expect("read output"), b"second");
+        let entries = std::fs::read_dir(&dir).expect("list dir").count();
+        std::fs::remove_dir_all(&dir).expect("clean up");
+        assert_eq!(entries, 1, "temporary files left behind");
+    }
 }
