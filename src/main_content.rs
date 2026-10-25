@@ -268,7 +268,7 @@ mod tests {
         );
         assert_eq!(
             extract_main_content(&prose, MainContentFallback::Error)
-                .unwrap()
+                .expect("expected prose extraction to succeed")
                 .source,
             MainContentSource::Prose
         );
