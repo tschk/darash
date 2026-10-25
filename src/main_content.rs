@@ -307,7 +307,10 @@ mod tests {
             ("div role='main'", MainContentSource::Main),
             ("div role='article'", MainContentSource::Article),
         ] {
-            let closing = landmark.split_whitespace().next().unwrap();
+            let closing = landmark
+                .split_whitespace()
+                .next()
+                .expect("landmark should not be empty");
             let html = format!(
                 "<form><{landmark}><h1>Guide</h1><p>Useful content</p><div role='search'>Search clutter</div></{closing}></form><form><input name='search'>Ordinary form</form>"
             );
