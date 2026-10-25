@@ -655,7 +655,6 @@ fn table_from_element(table: scraper::ElementRef) -> Option<Table> {
         };
 
         cells.extend(iterator.map(|cell| collapse_ws(cell.text().collect::<String>().trim())));
-
         if cells.is_empty() {
             continue;
         }
