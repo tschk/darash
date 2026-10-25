@@ -22,6 +22,19 @@ pub mod fetch;
 pub mod filter;
 pub mod main_content;
 
+pub trait StringErrorExt<T> {
+    fn map_err_to_string(self) -> Result<T, String>;
+}
+
+impl<T, E> StringErrorExt<T> for Result<T, E>
+where
+    E: std::fmt::Display,
+{
+    fn map_err_to_string(self) -> Result<T, String> {
+        self.map_err(|e| e.to_string())
+    }
+}
+
 pub use websurfx::{
     build_search_url as build_websurfx_search_url, WebsurfxEngineError, WebsurfxError,
     WebsurfxMappedResponse, WebsurfxMetadata, WebsurfxQuery, WebsurfxResponse, WebsurfxResult,

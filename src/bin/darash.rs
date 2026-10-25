@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use darash::fetch::{self, FetchReport, PageState};
 use darash::{disk_cache, filter};
-use darash::{SearchClient, SearchMode, SearchRequest, SearchResponse, SearchSource};
+use darash::{
+    SearchClient, SearchMode, SearchRequest, SearchResponse, SearchSource, StringErrorExt,
+};
 use serde_json::{json, Value};
 
 const DEFAULT_FETCH_LIMIT: usize = 50;
@@ -147,14 +149,10 @@ async fn run_search(args: SearchArgs) -> Result<(), String> {
         Some(endpoint) => SearchClient::new(endpoint),
         None => SearchClient::local(),
     }
-    .map_err(|error| error.to_string())?;
-    let response = client
-        .search_request(&request)
-        .await
-        .map_err(|error| error.to_string())?;
+    .map_err_to_string()?;
+    let response = client.search_request(&request).await.map_err_to_string()?;
     if args.json {
-        let rendered =
-            serde_json::to_string_pretty(&response).map_err(|error| error.to_string())?;
+        let rendered = serde_json::to_string_pretty(&response).map_err_to_string()?;
         println!("{rendered}");
     } else {
         print_response(&response);
@@ -205,9 +203,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     let report = if is_url {
         fetch_report(&args, &method, cacheable).await?
     } else {
-        fetch::read_source(&args.input)
-            .await
-            .map_err(|error| error.to_string())?
+        fetch::read_source(&args.input).await.map_err_to_string()?
     };
 
     if let Some(path) = &args.output {
@@ -219,8 +215,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
 
     match extraction {
         Extraction::Report => {
-            let rendered =
-                serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
+            let rendered = serde_json::to_string_pretty(&report).map_err_to_string()?;
             println!("{rendered}");
             return Ok(fail_code(&args, &report));
         }
@@ -237,7 +232,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
                     darash::main_content::MainContentFallback::Error
                 };
                 let content = darash::main_content::extract_main_content(&report.body, fallback)
-                    .map_err(|error| error.to_string())?;
+                    .map_err_to_string()?;
                 eprintln!("darash fetch: content={:?}", content.source);
                 Some(content)
             } else {
@@ -269,7 +264,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
                     )
                 })
                 .collect::<Vec<_>>();
-            let data = serde_json::to_value(&entries).map_err(|error| error.to_string())?;
+            let data = serde_json::to_value(&entries).map_err_to_string()?;
             let (limited, limit_omitted) = cap(items, args.limit.unwrap_or(DEFAULT_FETCH_LIMIT));
             let budgeted = fetch::apply_budget(limited, args.budget);
             let omitted = limit_omitted + budgeted.omitted;
@@ -353,13 +348,12 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     if args.json_envelope {
         let envelope = json!({
             "data": data,
-            "meta": serde_json::to_value(&meta).map_err(|error| error.to_string())?,
+            "meta": serde_json::to_value(&meta).map_err_to_string()?,
         });
-        let rendered =
-            serde_json::to_string_pretty(&envelope).map_err(|error| error.to_string())?;
+        let rendered = serde_json::to_string_pretty(&envelope).map_err_to_string()?;
         println!("{rendered}");
     } else if force_json && !args.json {
-        let rendered = serde_json::to_string_pretty(&data).map_err(|error| error.to_string())?;
+        let rendered = serde_json::to_string_pretty(&data).map_err_to_string()?;
         println!("{rendered}");
     } else if args.json {
         emit_json(
@@ -404,7 +398,7 @@ async fn fetch_report(
             options.wait_for = args.wait_for.clone();
             return darash::browser::fetch_rendered(&args.input, &options)
                 .await
-                .map_err(|error| error.to_string());
+                .map_err_to_string();
         }
         #[cfg(not(feature = "browser"))]
         return Err("--render requires a build with the browser feature (cargo install darash --features browser)".into());
@@ -433,7 +427,7 @@ async fn fetch_report(
     };
     let report = fetch::fetch_with(&args.input, &options)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err_to_string()?;
     if cacheable {
         let _ = disk_cache::store(&args.input, &report).await;
     }
@@ -487,8 +481,7 @@ fn build_records(
     match extraction {
         Extraction::Select => {
             let selector = args.select.as_deref().expect("select mode has a selector");
-            let texts =
-                fetch::select_texts(&report.body, selector).map_err(|error| error.to_string())?;
+            let texts = fetch::select_texts(&report.body, selector).map_err_to_string()?;
             let records = texts
                 .into_iter()
                 .map(|text| Record {
@@ -501,10 +494,9 @@ fn build_records(
         Extraction::Row => {
             let container = args.select.as_deref().expect("row mode has a container");
             let spec = args.row.as_deref().expect("row mode has a spec");
-            let rows =
-                fetch::rows(&report.body, container, spec).map_err(|error| error.to_string())?;
+            let rows = fetch::rows(&report.body, container, spec).map_err_to_string()?;
             let headers = fetch::parse_row_spec(spec)
-                .map_err(|error| error.to_string())?
+                .map_err_to_string()?
                 .into_iter()
                 .map(|(name, _)| name)
                 .collect::<Vec<_>>();
