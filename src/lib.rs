@@ -775,7 +775,7 @@ pub struct SearchFilters {
     pub no_providers_selected: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct SearchResponse {
     #[serde(default)]
     pub query: String,
@@ -813,7 +813,7 @@ impl SearchResponse {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct SearchResult {
     #[serde(default)]
     pub title: String,
@@ -895,7 +895,7 @@ impl SearchResult {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Citation {
     pub title: String,
     pub url: String,
@@ -1012,6 +1012,13 @@ mod tests {
     }
 
     #[test]
+    fn search_source_name_is_correct() {
+        assert_eq!(SearchSource::Web.name(), "duckduckgo");
+        assert_eq!(SearchSource::Academic.name(), "openalex");
+        assert_eq!(SearchSource::Discussions.name(), "hacker-news");
+    }
+
+    #[test]
     fn time_range_as_str_and_value_are_correct() {
         assert_eq!(TimeRange::Day.as_str(), "day");
         assert_eq!(TimeRange::Week.as_str(), "week");
@@ -1059,6 +1066,13 @@ mod tests {
     }
 
     #[test]
+    fn search_mode_as_str_returns_expected_values() {
+        assert_eq!(SearchMode::Speed.as_str(), "speed");
+        assert_eq!(SearchMode::Balanced.as_str(), "balanced");
+        assert_eq!(SearchMode::Quality.as_str(), "quality");
+    }
+
+    #[test]
     fn search_modes_expose_retrieval_limits() {
         assert_eq!(SearchMode::Speed.provider_limit(), 1);
         assert_eq!(SearchMode::Speed.provider_concurrency(), 1);
@@ -1103,8 +1117,7 @@ mod tests {
             title: "Backend source".to_owned(),
             url: "https://example.com".to_owned(),
             snippet: "source".to_owned(),
-            source: None,
-            published_date: None,
+            ..Default::default()
         };
         let response = |count| SearchResponse {
             query: "rust".to_owned(),
@@ -1113,21 +1126,11 @@ mod tests {
                 .map(|index| SearchResult {
                     title: index.to_string(),
                     url: format!("https://example.com/{index}"),
-                    content: String::new(),
-                    engine: None,
-                    engines: Vec::new(),
-                    category: None,
-                    published_date: None,
-                    score: None,
+                    ..Default::default()
                 })
                 .collect(),
-            answers: Vec::new(),
-            answer: None,
             sources: vec![source.clone(); count as usize],
-            corrections: Vec::new(),
-            suggestions: Vec::new(),
-            provider_status: Vec::new(),
-            filters: SearchFilters::default(),
+            ..Default::default()
         };
 
         for (mode, limit) in [
@@ -1182,7 +1185,7 @@ mod tests {
     #[test]
     fn search_config_builder_methods_populate_fields() {
         let config = SearchConfig::new("https://example.com")
-            .unwrap()
+            .expect("valid endpoint")
             .with_blocklist(["badsite.com", "spam.org"])
             .with_allowlist(["goodsite.com"])
             .with_timeout(std::time::Duration::from_secs(10))
@@ -1216,30 +1219,16 @@ mod tests {
                     title: "ok".to_owned(),
                     url: "https://example.com/rust".to_owned(),
                     content: "guide".to_owned(),
-                    engine: None,
-                    engines: Vec::new(),
-                    category: None,
-                    published_date: None,
-                    score: None,
+                    ..Default::default()
                 },
                 SearchResult {
                     title: "bad".to_owned(),
                     url: "javascript:alert(1)".to_owned(),
                     content: "xss".to_owned(),
-                    engine: None,
-                    engines: Vec::new(),
-                    category: None,
-                    published_date: None,
-                    score: None,
+                    ..Default::default()
                 },
             ],
-            answers: Vec::new(),
-            answer: None,
-            sources: Vec::new(),
-            corrections: Vec::new(),
-            suggestions: Vec::new(),
-            provider_status: Vec::new(),
-            filters: SearchFilters::default(),
+            ..Default::default()
         };
         retain_http_results(&mut response);
         assert_eq!(response.results.len(), 1);
@@ -1517,15 +1506,7 @@ mod tests {
 
         let dummy_response = SearchResponse {
             query: "rust".to_owned(),
-            number_of_results: 0,
-            results: Vec::new(),
-            answers: Vec::new(),
-            answer: None,
-            sources: Vec::new(),
-            corrections: Vec::new(),
-            suggestions: Vec::new(),
-            provider_status: Vec::new(),
-            filters: SearchFilters::default(),
+            ..Default::default()
         };
 
         client.cache.insert(

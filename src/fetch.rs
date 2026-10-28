@@ -285,6 +285,35 @@ fn render_element(name: &str, element: scraper::ElementRef, mode: RenderMode, ou
     }
 }
 
+fn render_paragraph(element: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let text = render_inline(element, mode);
+    if !text.trim().is_empty() {
+        push_paragraph(out, text.trim());
+    }
+}
+
+fn render_table(element: scraper::ElementRef, out: &mut String) {
+    if let Some(table) = table_from_element(element) {
+        push_paragraph(out, &table.to_markdown());
+    }
+}
+
+fn render_hr(mode: RenderMode, out: &mut String) {
+    if mode == RenderMode::Markdown {
+        push_paragraph(out, "---");
+    }
+}
+
+fn render_dl(element: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    for item in element.child_elements() {
+        match item.value().name() {
+            "dt" => push_paragraph(out, render_inline(item, mode).trim()),
+            "dd" => push_paragraph(out, &format!(": {}", render_inline(item, mode).trim())),
+            _ => {}
+        }
+    }
+}
+
 fn render_heading(name: &str, element: scraper::ElementRef, mode: RenderMode, out: &mut String) {
     let level = name.as_bytes()[1] - b'0';
     let text = render_inline(element, mode);
@@ -297,13 +326,6 @@ fn render_heading(name: &str, element: scraper::ElementRef, mode: RenderMode, ou
             &format!("{} {}", "#".repeat(level as usize), text.trim()),
         );
     } else {
-        push_paragraph(out, text.trim());
-    }
-}
-
-fn render_paragraph(element: scraper::ElementRef, mode: RenderMode, out: &mut String) {
-    let text = render_inline(element, mode);
-    if !text.trim().is_empty() {
         push_paragraph(out, text.trim());
     }
 }
@@ -333,28 +355,6 @@ fn render_blockquote(element: scraper::ElementRef, mode: RenderMode, out: &mut S
         .collect::<Vec<_>>()
         .join("\n");
     push_paragraph(out, &quoted);
-}
-
-fn render_table(element: scraper::ElementRef, out: &mut String) {
-    if let Some(table) = table_from_element(element) {
-        push_paragraph(out, &table.to_markdown());
-    }
-}
-
-fn render_hr(mode: RenderMode, out: &mut String) {
-    if mode == RenderMode::Markdown {
-        push_paragraph(out, "---");
-    }
-}
-
-fn render_dl(element: scraper::ElementRef, mode: RenderMode, out: &mut String) {
-    for item in element.child_elements() {
-        match item.value().name() {
-            "dt" => push_paragraph(out, render_inline(item, mode).trim()),
-            "dd" => push_paragraph(out, &format!(": {}", render_inline(item, mode).trim())),
-            _ => {}
-        }
-    }
 }
 
 fn render_list(list: scraper::ElementRef, mode: RenderMode, out: &mut String) {
@@ -425,58 +425,68 @@ fn render_inline_children(element: scraper::ElementRef, mode: RenderMode, out: &
 fn render_inline_node(name: &str, child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
     match name {
         "br" => out.push('\n'),
-        "strong" | "b" => {
-            let inner = render_inline(child, mode);
-            if mode == RenderMode::Markdown && !inner.trim().is_empty() {
-                out.push_str(&format!("**{}**", inner.trim()));
-            } else {
-                out.push_str(&inner);
-            }
-        }
-        "em" | "i" => {
-            let inner = render_inline(child, mode);
-            if mode == RenderMode::Markdown && !inner.trim().is_empty() {
-                out.push_str(&format!("*{}*", inner.trim()));
-            } else {
-                out.push_str(&inner);
-            }
-        }
-        "code" | "kbd" | "samp" => {
-            let inner = child.text().collect::<String>();
-            if mode == RenderMode::Markdown {
-                out.push_str(&format!("`{}`", inner.trim()));
-            } else {
-                out.push_str(inner.trim());
-            }
-        }
-        "img" => {
-            if mode == RenderMode::Markdown {
-                let alt = child.value().attr("alt").unwrap_or_default();
-                if let Some(src) = child.value().attr("src") {
-                    out.push_str(&format!("![{alt}]({src})"));
-                }
-            }
-        }
-        "a" => {
-            let inner = render_inline(child, mode);
-            let href = child.value().attr("href");
-            if mode == RenderMode::Markdown {
-                if let Some(href) = href {
-                    let label = if inner.trim().is_empty() {
-                        href
-                    } else {
-                        inner.trim()
-                    };
-                    out.push_str(&format!("[{label}]({href})"));
-                } else {
-                    out.push_str(&inner);
-                }
-            } else {
-                out.push_str(&inner);
-            }
-        }
+        "strong" | "b" => render_strong(child, mode, out),
+        "em" | "i" => render_emphasis(child, mode, out),
+        "code" | "kbd" | "samp" => render_code(child, mode, out),
+        "img" => render_image(child, mode, out),
+        "a" => render_link(child, mode, out),
         "p" | "div" | "li" | "section" | "article" => out.push(' '),
         _ => out.push_str(&render_inline(child, mode)),
+    }
+}
+
+fn render_strong(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let inner = render_inline(child, mode);
+    if mode == RenderMode::Markdown && !inner.trim().is_empty() {
+        out.push_str(&format!("**{}**", inner.trim()));
+    } else {
+        out.push_str(&inner);
+    }
+}
+
+fn render_emphasis(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let inner = render_inline(child, mode);
+    if mode == RenderMode::Markdown && !inner.trim().is_empty() {
+        out.push_str(&format!("*{}*", inner.trim()));
+    } else {
+        out.push_str(&inner);
+    }
+}
+
+fn render_code(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let inner = child.text().collect::<String>();
+    if mode == RenderMode::Markdown {
+        out.push_str(&format!("`{}`", inner.trim()));
+    } else {
+        out.push_str(inner.trim());
+    }
+}
+
+fn render_image(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    if mode == RenderMode::Markdown {
+        let alt = child.value().attr("alt").unwrap_or_default();
+        if let Some(src) = child.value().attr("src") {
+            out.push_str(&format!("![{alt}]({src})"));
+        }
+    }
+}
+
+fn render_link(child: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let inner = render_inline(child, mode);
+    let href = child.value().attr("href");
+    if mode == RenderMode::Markdown {
+        if let Some(href) = href {
+            let label = if inner.trim().is_empty() {
+                href
+            } else {
+                inner.trim()
+            };
+            out.push_str(&format!("[{label}]({href})"));
+        } else {
+            out.push_str(&inner);
+        }
+    } else {
+        out.push_str(&inner);
     }
 }
 
@@ -656,11 +666,18 @@ fn table_from_element(table: scraper::ElementRef) -> Option<Table> {
     let mut rows: Vec<Vec<String>> = Vec::new();
 
     for row in table.select(&row_selector) {
-        let cells: Vec<String> = row
-            .child_elements()
-            .filter(|cell| matches!(cell.value().name(), "td" | "th"))
-            .map(|cell| collapse_ws(cell.text().collect::<String>().trim()))
-            .collect();
+        let mut cells = if headers.is_empty() {
+            Vec::new()
+        } else {
+            Vec::with_capacity(headers.len())
+        };
+
+        for cell in row.child_elements() {
+            if matches!(cell.value().name(), "td" | "th") {
+                cells.push(collapse_ws(cell.text().collect::<String>().trim()));
+            }
+        }
+
         if cells.is_empty() {
             continue;
         }
@@ -814,8 +831,8 @@ pub fn apply_budget(items: Vec<String>, budget: Option<usize>) -> Budgeted {
     let total = items.len();
     let mut kept = Vec::new();
     let mut used = 0usize;
-    for (index, item) in items.iter().enumerate() {
-        let cost = estimate_tokens(item);
+    for (index, item) in items.into_iter().enumerate() {
+        let cost = estimate_tokens(&item);
         if index > 0 && used + cost > budget {
             let omitted = total - kept.len();
             return Budgeted {
@@ -824,7 +841,7 @@ pub fn apply_budget(items: Vec<String>, budget: Option<usize>) -> Budgeted {
             };
         }
         used += cost;
-        kept.push(item.clone());
+        kept.push(item);
     }
     Budgeted {
         items: kept,
@@ -1097,14 +1114,15 @@ mod tests {
     }
 
     #[test]
-    fn to_markdown_exact_output() {
-        // Headings and paragraphs
+    fn to_markdown_exact_output_headings_and_paragraphs() {
         assert_eq!(
             to_markdown("<h1>Heading 1</h1><p>Paragraph text.</p><h2>Heading 2</h2>"),
             "# Heading 1\n\nParagraph text.\n\n## Heading 2\n"
         );
+    }
 
-        // Bold and italics
+    #[test]
+    fn to_markdown_exact_output_bold_and_italics() {
         assert_eq!(
             to_markdown("<p>This is <strong>bold</strong> and <em>italic</em>.</p>"),
             "This is **bold** and *italic*.\n"
@@ -1113,8 +1131,10 @@ mod tests {
             to_markdown("<p>This is <b>bold</b> and <i>italic</i>.</p>"),
             "This is **bold** and *italic*.\n"
         );
+    }
 
-        // Links
+    #[test]
+    fn to_markdown_exact_output_links() {
         assert_eq!(
             to_markdown("<a href=\"https://example.com\">Example</a>"),
             "[Example](https://example.com)\n"
@@ -1123,8 +1143,10 @@ mod tests {
             to_markdown("<a href=\"https://example.com\"></a>"),
             "[https://example.com](https://example.com)\n"
         );
+    }
 
-        // Code and Preformatted text
+    #[test]
+    fn to_markdown_exact_output_code_and_preformatted() {
         assert_eq!(
             to_markdown("<p>Use <code>cargo run</code></p>"),
             "Use `cargo run`\n"
@@ -1133,8 +1155,10 @@ mod tests {
             to_markdown("<pre>fn main() {\n    println!(\"Hello\");\n}</pre>"),
             "```\nfn main() {\n    println!(\"Hello\");\n}\n```\n"
         );
+    }
 
-        // Lists
+    #[test]
+    fn to_markdown_exact_output_lists() {
         assert_eq!(
             to_markdown("<ul><li>Item 1</li><li>Item 2</li></ul>"),
             "- Item 1\n- Item 2\n"
@@ -1143,23 +1167,31 @@ mod tests {
             to_markdown("<ol><li>First</li><li>Second</li></ol>"),
             "1. First\n2. Second\n"
         );
+    }
 
-        // Blockquotes
+    #[test]
+    fn to_markdown_exact_output_blockquotes() {
         assert_eq!(
             to_markdown("<blockquote><p>To be</p><p>or not to be</p></blockquote>"),
             "> To be\n> \n> or not to be\n"
         );
+    }
 
-        // Horizontal rules
+    #[test]
+    fn to_markdown_exact_output_horizontal_rules() {
         assert_eq!(to_markdown("<hr>"), "---\n");
+    }
 
-        // Ignored elements
+    #[test]
+    fn to_markdown_exact_output_ignored_elements() {
         assert_eq!(
             to_markdown("<script>alert(1);</script><style>body{}</style><p>Visible</p>"),
             "Visible\n"
         );
+    }
 
-        // Whitespace collapsing
+    #[test]
+    fn to_markdown_exact_output_whitespace_collapsing() {
         assert_eq!(
             to_markdown("<p>   Multiple    spaces\nand newlines   </p>"),
             "Multiple spaces and newlines\n"
@@ -1347,6 +1379,54 @@ mod tests {
         assert_eq!(estimate_tokens("abcde"), 2);
     }
 
+    #[test]
+    fn fetch_report_summary_formats_correctly() {
+        let local_report = FetchReport {
+            status: None,
+            ok: true,
+            url: "file.html".to_string(),
+            redirected: false,
+            ms: 0,
+            content_type: None,
+            bytes: 14,
+            body: "<h1>Local</h1>".to_string(),
+        };
+        assert_eq!(
+            local_report.summary(),
+            "status=local ok=true url=file.html ms=0 bytes=14"
+        );
+
+        let http_report = FetchReport {
+            status: Some(200),
+            ok: true,
+            url: "https://example.com".to_string(),
+            redirected: true,
+            ms: 150,
+            content_type: Some("text/html".to_string()),
+            bytes: 1024,
+            body: "<html>...</html>".to_string(),
+        };
+        assert_eq!(
+            http_report.summary(),
+            "status=200 ok=true url=https://example.com ms=150 bytes=1024"
+        );
+
+        let error_report = FetchReport {
+            status: Some(404),
+            ok: false,
+            url: "https://example.com/notfound".to_string(),
+            redirected: false,
+            ms: 45,
+            content_type: None,
+            bytes: 0,
+            body: "".to_string(),
+        };
+        assert_eq!(
+            error_report.summary(),
+            "status=404 ok=false url=https://example.com/notfound ms=45 bytes=0"
+        );
+    }
+
     #[tokio::test]
     async fn local_reports_read_files_without_http() {
         let mut path = std::env::temp_dir();
@@ -1417,6 +1497,22 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].selector, "p > a");
         assert_eq!(hits[0].kind, "attr");
+    }
+
+    #[test]
+    fn fetch_report_from_source_initializes_correctly() {
+        let source = "test_source.html";
+        let body = "<h1>Hello, test!</h1>";
+        let report = FetchReport::from_source(source, body);
+
+        assert_eq!(report.status, None);
+        assert!(report.ok);
+        assert_eq!(report.url, source);
+        assert!(!report.redirected);
+        assert_eq!(report.ms, 0);
+        assert_eq!(report.content_type, None);
+        assert_eq!(report.bytes, body.len());
+        assert_eq!(report.body, body);
     }
 
     #[test]

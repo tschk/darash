@@ -84,10 +84,26 @@ fn bench_read_source(c: &mut Criterion) {
     std::fs::remove_file(&temp_path).ok();
 }
 
+fn bench_apply_budget(c: &mut Criterion) {
+    let mut group = c.benchmark_group("apply_budget");
+    group.bench_function("apply_budget", |b| {
+        b.iter_batched(
+            || {
+                let items: Vec<String> = (0..1000).map(|i| format!("item number {} with some more text to avoid small string optimization maybe, a somewhat long string that requires actual allocation.", i)).collect();
+                items
+            },
+            |items| black_box(fetch::apply_budget(items, Some(10000))),
+            criterion::BatchSize::SmallInput,
+        )
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_citation,
     bench_with_sources,
-    bench_read_source
+    bench_read_source,
+    bench_apply_budget
 );
 criterion_main!(benches);
