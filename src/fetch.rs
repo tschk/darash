@@ -658,11 +658,18 @@ fn table_from_element(table: scraper::ElementRef) -> Option<Table> {
     let mut rows: Vec<Vec<String>> = Vec::new();
 
     for row in table.select(&row_selector) {
-        let cells: Vec<String> = row
-            .child_elements()
-            .filter(|cell| matches!(cell.value().name(), "td" | "th"))
-            .map(|cell| collapse_ws(cell.text().collect::<String>().trim()))
-            .collect();
+        let mut cells = if headers.is_empty() {
+            Vec::new()
+        } else {
+            Vec::with_capacity(headers.len())
+        };
+
+        for cell in row.child_elements() {
+            if matches!(cell.value().name(), "td" | "th") {
+                cells.push(collapse_ws(cell.text().collect::<String>().trim()));
+            }
+        }
+
         if cells.is_empty() {
             continue;
         }
