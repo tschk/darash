@@ -267,34 +267,13 @@ const BLOCK_CONTAINERS: [&str; 18] = [
 fn render_element(name: &str, element: scraper::ElementRef, mode: RenderMode, out: &mut String) {
     match name {
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => render_heading(name, element, mode, out),
-        "p" => {
-            let text = render_inline(element, mode);
-            if !text.trim().is_empty() {
-                push_paragraph(out, text.trim());
-            }
-        }
+        "p" => render_paragraph(element, mode, out),
         "ul" | "ol" => render_list(element, mode, out),
         "pre" => render_pre(element, mode, out),
         "blockquote" => render_blockquote(element, mode, out),
-        "table" => {
-            if let Some(table) = table_from_element(element) {
-                push_paragraph(out, &table.to_markdown());
-            }
-        }
-        "hr" => {
-            if mode == RenderMode::Markdown {
-                push_paragraph(out, "---");
-            }
-        }
-        "dl" => {
-            for item in element.child_elements() {
-                match item.value().name() {
-                    "dt" => push_paragraph(out, render_inline(item, mode).trim()),
-                    "dd" => push_paragraph(out, &format!(": {}", render_inline(item, mode).trim())),
-                    _ => {}
-                }
-            }
-        }
+        "table" => render_table(element, out),
+        "hr" => render_hr(mode, out),
+        "dl" => render_dl(element, mode, out),
         name if BLOCK_CONTAINERS.contains(&name) => render_children(element, mode, out),
         _ => {
             let mut buf = String::new();
@@ -302,6 +281,35 @@ fn render_element(name: &str, element: scraper::ElementRef, mode: RenderMode, ou
             if !buf.trim().is_empty() {
                 push_paragraph(out, buf.trim());
             }
+        }
+    }
+}
+
+fn render_paragraph(element: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    let text = render_inline(element, mode);
+    if !text.trim().is_empty() {
+        push_paragraph(out, text.trim());
+    }
+}
+
+fn render_table(element: scraper::ElementRef, out: &mut String) {
+    if let Some(table) = table_from_element(element) {
+        push_paragraph(out, &table.to_markdown());
+    }
+}
+
+fn render_hr(mode: RenderMode, out: &mut String) {
+    if mode == RenderMode::Markdown {
+        push_paragraph(out, "---");
+    }
+}
+
+fn render_dl(element: scraper::ElementRef, mode: RenderMode, out: &mut String) {
+    for item in element.child_elements() {
+        match item.value().name() {
+            "dt" => push_paragraph(out, render_inline(item, mode).trim()),
+            "dd" => push_paragraph(out, &format!(": {}", render_inline(item, mode).trim())),
+            _ => {}
         }
     }
 }
