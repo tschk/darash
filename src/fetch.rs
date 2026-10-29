@@ -1443,6 +1443,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_reports_reject_files_larger_than_max_body_bytes() {
+        let mut path = std::env::temp_dir();
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!("darash-fetch-test-large-{}.html", suffix));
+
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .expect("fixture writes");
+
+        file.set_len(FETCH_MAX_BODY_BYTES as u64 + 1)
+            .expect("fixture set_len");
+
+        let error = read_source(&path).await.expect_err("fixture reads");
+        assert!(matches!(
+            error,
+            Error::FetchBodyTooLarge {
+                limit: FETCH_MAX_BODY_BYTES
+            }
+        ));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
     async fn fetch_rejects_non_http_schemes() {
         let error = fetch("ftp://example.test", &[])
             .await
