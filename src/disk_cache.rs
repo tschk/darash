@@ -328,4 +328,24 @@ mod tests {
         assert!(is_credential_param("apiKey"));
         assert!(!is_credential_param("monkey"));
     }
+
+    #[tokio::test]
+    async fn load_returns_none_for_invalid_json() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let url = format!("https://example.com/invalid_json_{}", now);
+
+        let Some(cache_dir_path) = cache_dir() else {
+            return; // Skip test if no cache directory is available
+        };
+        fs::create_dir_all(&cache_dir_path).await.unwrap();
+
+        let path = cache_dir_path.join(format!("{}.json", cache_key(&url)));
+        fs::write(&path, b"{ invalid json }").await.unwrap();
+
+        let result = load(&url).await;
+        assert!(result.is_none());
+
+        let _ = fs::remove_file(&path).await;
+    }
 }
