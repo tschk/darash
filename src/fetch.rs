@@ -1547,7 +1547,10 @@ mod tests {
     #[tokio::test]
     async fn local_reports_reject_files_larger_than_max_body_bytes() {
         let mut path = std::env::temp_dir();
-        path.push(format!("darash-fetch-large-test-{}.html", fastrand::u32(..)));
+        path.push(format!(
+            "darash-fetch-large-test-{}.html",
+            fastrand::u32(..)
+        ));
 
         let file = std::fs::OpenOptions::new()
             .write(true)
@@ -1568,7 +1571,9 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(Error::FetchBodyTooLarge { limit: FETCH_MAX_BODY_BYTES })
+            Err(Error::FetchBodyTooLarge {
+                limit: FETCH_MAX_BODY_BYTES
+            })
         ));
 
         std::fs::remove_file(&path).ok();
