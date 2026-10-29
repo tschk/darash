@@ -1515,6 +1515,34 @@ mod tests {
         assert_eq!(report.body, body);
     }
 
+    #[tokio::test]
+    #[cfg(feature = "client")]
+    async fn read_source_handling_files_larger_than_max_body_bytes() {
+        let suffix = fastrand::u64(..);
+        let path = std::env::temp_dir().join(format!("darash-test-body-too-large-{}", suffix));
+
+        {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .unwrap();
+            let data = vec![0u8; FETCH_MAX_BODY_BYTES + 1];
+            file.write_all(&data).unwrap();
+        }
+
+        let result = read_source(&path).await;
+
+        let _ = std::fs::remove_file(&path);
+
+        let error = result.unwrap_err();
+        match error {
+            Error::FetchBodyTooLarge { limit } => assert_eq!(limit, FETCH_MAX_BODY_BYTES),
+            _ => panic!("Expected FetchBodyTooLarge error, got: {:?}", error),
+        }
+    }
+
     #[test]
     fn paginate_state_machine_covers_more_complete_and_past_end() {
         let more = paginate(100, 0, 50);

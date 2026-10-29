@@ -301,6 +301,7 @@ version = "0.8.0"
 dependencies = [
  "base64",
  "criterion",
+ "fastrand",
  "futures-util",
  "libc",
  "log",
