@@ -539,17 +539,18 @@ fn build_records(
                         .rows
                         .into_iter()
                         .map(|row| {
-                            let cells = row.clone();
                             let mut object = serde_json::Map::new();
-                            for (index, header) in headers.iter().enumerate() {
-                                object.insert(
-                                    header.clone(),
-                                    json!(row.get(index).cloned().unwrap_or_default()),
-                                );
+                            for (header, cell) in headers.iter().zip(row.iter()) {
+                                object.insert(header.clone(), Value::String(cell.clone()));
+                            }
+                            if headers.len() > row.len() {
+                                for header in headers.iter().skip(row.len()) {
+                                    object.insert(header.clone(), Value::String(String::new()));
+                                }
                             }
                             Record {
                                 json: Value::Object(object),
-                                cells,
+                                cells: row,
                             }
                         })
                         .collect();
