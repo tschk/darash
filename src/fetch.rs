@@ -1441,6 +1441,32 @@ mod tests {
 
         std::fs::remove_file(&path).ok();
     }
+    #[tokio::test]
+    async fn read_source_rejects_files_exceeding_max_body_bytes() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("darash-fetch-too-large-{}-{}.html", std::process::id(), fastrand::u64(..)));
+
+        let mut file = std::fs::File::create(&path).unwrap();
+        let chunk = vec![b'A'; 1024];
+        let mut written = 0;
+        let target = FETCH_MAX_BODY_BYTES + 1;
+
+        while written < target {
+            let to_write = std::cmp::min(chunk.len(), target - written);
+            std::io::Write::write_all(&mut file, &chunk[..to_write]).unwrap();
+            written += to_write;
+        }
+
+        drop(file);
+        let error = read_source(&path).await.unwrap_err();
+        match error {
+            Error::FetchBodyTooLarge { limit } => assert_eq!(limit, FETCH_MAX_BODY_BYTES),
+            _ => panic!("Expected FetchBodyTooLarge error, got {:?}", error),
+        }
+
+        std::fs::remove_file(&path).ok();
+    }
+
 
     #[tokio::test]
     async fn fetch_rejects_non_http_schemes() {

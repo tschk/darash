@@ -37,6 +37,7 @@ browser = ["client", "dep:tokio-tungstenite", "dep:tempfile", "dep:base64", "dep
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
+fastrand = "2.5.0"
 
 [[bin]]
 name = "darash"
