@@ -909,6 +909,8 @@ mod tests {
                             "/tamper" => (200, "Content-Type: text/html\r\n".into(), "<script>TextEncoder=class {encode(){return []}}; document.write('<main>'+'x'.repeat(4096)+'</main>')</script>".into()),
                             "/slow" => { tokio::time::sleep(Duration::from_secs(3)).await; (200, String::new(), "Slow".into()) },
                             "/download" => (200, "Content-Disposition: attachment; filename=download.html\r\n".into(), "<main>Download</main>".into()),
+                            // Security Note: This is a test-only fixture path inside a #[cfg(test)] module.
+                            // It intentionally uses unencrypted HTTP to verify proxy filtering behavior and is never included in production builds.
                             "/auth" => (200, "Content-Type: text/html\r\nSet-Cookie: secret=value\r\n".into(), "<script>fetch('/auth-hop',{headers:{Authorization:'secret'}}).then(()=>document.body.innerHTML='<main id=ready>Done</main>')</script>".into()),
                             "/auth-hop" => (302, format!("Location: http://other.fixture.test:{}/capture\r\n", address.port()), String::new()),
                             "/unsupported" => (200, "Content-Type: text/html\r\n".into(), format!("<script>new WebSocket('ws://127.0.0.1:{0}/secret'); new Worker('/worker.js'); navigator.serviceWorker.register('/sw.js').catch(()=>{{}}); window.open('http://127.0.0.1:{0}/secret'); setTimeout(()=>document.body.innerHTML='<main id=ready>Done</main>',300)</script>", address.port())),
