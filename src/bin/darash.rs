@@ -830,6 +830,7 @@ fn parse_args(args: &[String]) -> Result<Option<Command>, String> {
 }
 
 fn parse_search_args(args: &[String]) -> Result<Option<SearchArgs>, String> {
+    use lexopt::prelude::*;
     let mut query = Vec::new();
     let mut mode = SearchMode::default();
     let mut sources = vec![SearchSource::default()];
@@ -837,28 +838,46 @@ fn parse_search_args(args: &[String]) -> Result<Option<SearchArgs>, String> {
     let mut json = false;
     let mut source_set = false;
 
-    let mut index = 0;
-    while index < args.len() {
-        let arg = args[index].as_str();
-        index += 1;
+    let mut parser = lexopt::Parser::from_args(args.iter().cloned());
+
+    while let Some(arg) = parser.next().map_err(|e| e.to_string())? {
         match arg {
-            "--mode" => {
-                mode = parse_mode(next_value(args, &mut index, "--mode")?)?;
+            Long("mode") => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                mode = parse_mode(&value)?;
             }
-            "--source" => {
+            Long("source") => {
                 if !source_set {
                     sources.clear();
                     source_set = true;
                 }
-                sources.push(parse_source(next_value(args, &mut index, "--source")?)?);
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                sources.push(parse_source(&value)?);
             }
-            "--url" => {
-                endpoint = Some(next_value(args, &mut index, "--url")?.to_owned());
+            Long("url") => {
+                endpoint = Some(
+                    parser
+                        .value()
+                        .map_err(|e| e.to_string())?
+                        .parse::<String>()
+                        .map_err(|e| e.to_string())?,
+                );
             }
-            "--json" => json = true,
-            "--help" | "-h" => return Ok(None),
-            value if value.starts_with('-') => return Err(format!("unknown option: {value}")),
-            value => query.push(value.to_owned()),
+            Long("json") => json = true,
+            Long("help") | Short('h') => return Ok(None),
+            Value(val) => {
+                query.push(val.into_string().map_err(|_| "invalid utf-8".to_string())?);
+            }
+            Long(other) => return Err(format!("unknown option: --{other}")),
+            Short(other) => return Err(format!("unknown option: -{other}")),
         }
     }
 
@@ -876,166 +895,203 @@ fn parse_search_args(args: &[String]) -> Result<Option<SearchArgs>, String> {
 }
 
 fn parse_fetch_args(args: &[String]) -> Result<Option<FetchArgs>, String> {
+    use lexopt::prelude::*;
     let mut parsed = FetchArgs::default();
+    let mut parser = lexopt::Parser::from_args(args.iter().cloned());
 
-    let mut index = 0;
-    while index < args.len() {
-        let arg = args[index].as_str();
-        index += 1;
-
-        if arg == "--" {
-            for value in &args[index..] {
+    while let Some(arg) = parser.next().map_err(|e| e.to_string())? {
+        match arg {
+            Long("body") => parsed.body = true,
+            Long("md") => parsed.markdown = true,
+            Long("text") => parsed.text = true,
+            Long("outline") => parsed.outline = true,
+            Long("table") => parsed.table = true,
+            Long("count") => parsed.count = true,
+            Long("json") => parsed.json = true,
+            Long("json-envelope") => parsed.json_envelope = true,
+            Long("insecure") | Short('k') => parsed.insecure = true,
+            Long("fail") | Short('f') => parsed.fail = true,
+            Long("head") | Short('I') => parsed.head = true,
+            Long("fresh") => parsed.fresh = true,
+            Long("no-cache") => parsed.no_cache = true,
+            Long("render") => parsed.render = true,
+            Long("main-content") => parsed.main_content = true,
+            Long("browser") => {
+                parsed.browser = Some(PathBuf::from(
+                    parser
+                        .value()
+                        .map_err(|e| e.to_string())?
+                        .parse::<String>()
+                        .map_err(|e| e.to_string())?,
+                ));
+            }
+            Long("wait-for") => {
+                parsed.wait_for = Some(
+                    parser
+                        .value()
+                        .map_err(|e| e.to_string())?
+                        .parse::<String>()
+                        .map_err(|e| e.to_string())?,
+                );
+            }
+            Long("main-fallback") => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                if value != "full" {
+                    return Err("--main-fallback accepts only full".into());
+                }
+                parsed.main_fallback_full = true;
+            }
+            Long("compressed") => {} // Accepted no-op
+            Long("select") => {
+                parsed.select = Some(
+                    parser
+                        .value()
+                        .map_err(|e| e.to_string())?
+                        .parse::<String>()
+                        .map_err(|e| e.to_string())?,
+                );
+            }
+            Long("row") => {
+                parsed.row = Some(
+                    parser
+                        .value()
+                        .map_err(|e| e.to_string())?
+                        .parse::<String>()
+                        .map_err(|e| e.to_string())?,
+                );
+            }
+            Long("locate") => {
+                parsed.locate = Some(
+                    parser
+                        .value()
+                        .map_err(|e| e.to_string())?
+                        .parse::<String>()
+                        .map_err(|e| e.to_string())?,
+                );
+            }
+            Long("where") => {
+                parsed.where_ = Some(
+                    parser
+                        .value()
+                        .map_err(|e| e.to_string())?
+                        .parse::<String>()
+                        .map_err(|e| e.to_string())?,
+                );
+            }
+            Long("method") | Short('X') => {
+                parsed.method = Some(
+                    parser
+                        .value()
+                        .map_err(|e| e.to_string())?
+                        .parse::<String>()
+                        .map_err(|e| e.to_string())?,
+                );
+            }
+            Long("user") | Short('u') => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                parsed.basic_auth = Some(parse_basic_auth(&value));
+            }
+            Long("output") | Short('o') => {
+                parsed.output = Some(PathBuf::from(
+                    parser
+                        .value()
+                        .map_err(|e| e.to_string())?
+                        .parse::<String>()
+                        .map_err(|e| e.to_string())?,
+                ));
+            }
+            Long("max-time") | Short('m') => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                parsed.max_time = Some(parse_seconds(&value)?);
+            }
+            Long("max-bytes") => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                parsed.max_bytes = Some(parse_usize(&value, "--max-bytes")?);
+            }
+            Long("limit") => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                parsed.limit = Some(parse_usize(&value, "--limit")?);
+            }
+            Long("budget") => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                parsed.budget = Some(parse_usize(&value, "--budget")?);
+            }
+            Long("offset") => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                parsed.offset = parse_usize(&value, "--offset")?;
+            }
+            Long("header") => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                parsed.headers.push(parse_header(&value)?);
+            }
+            Long("data") | Short('d') => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                add_data(&mut parsed, &value, DataMode::Strip)?;
+            }
+            Long("data-raw") => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                add_data(&mut parsed, &value, DataMode::Raw)?;
+            }
+            Long("data-binary") => {
+                let value = parser
+                    .value()
+                    .map_err(|e| e.to_string())?
+                    .parse::<String>()
+                    .map_err(|e| e.to_string())?;
+                add_data(&mut parsed, &value, DataMode::Binary)?;
+            }
+            Long("help") | Short('h') => return Ok(None),
+            Short('L') | Short('i') | Short('s') | Short('S') => {} // Accepted no-ops
+            Value(val) => {
+                let arg = val.into_string().map_err(|_| "invalid utf-8".to_string())?;
                 if !parsed.input.is_empty() {
-                    return Err(format!("unexpected argument: {value}"));
+                    return Err(format!("unexpected argument: {arg}"));
                 }
-                parsed.input = value.clone();
+                parsed.input = arg;
             }
-            break;
+            Long(other) => return Err(format!("unknown option: --{other}")),
+            Short(other) => return Err(format!("unknown option: -{other}")),
         }
-
-        if let Some(long) = arg.strip_prefix("--") {
-            let (name, inline) = match long.split_once('=') {
-                Some((name, value)) => (name, Some(value.to_owned())),
-                None => (long, None),
-            };
-            match name {
-                "body" => parsed.body = true,
-                "md" => parsed.markdown = true,
-                "text" => parsed.text = true,
-                "outline" => parsed.outline = true,
-                "table" => parsed.table = true,
-                "count" => parsed.count = true,
-                "json" => parsed.json = true,
-                "json-envelope" => parsed.json_envelope = true,
-                "insecure" => parsed.insecure = true,
-                "fail" => parsed.fail = true,
-                "head" => parsed.head = true,
-                "fresh" => parsed.fresh = true,
-                "no-cache" => parsed.no_cache = true,
-                "render" => parsed.render = true,
-                "main-content" => parsed.main_content = true,
-                "browser" => {
-                    parsed.browser = Some(PathBuf::from(option_value(
-                        args,
-                        &mut index,
-                        inline,
-                        "--browser",
-                    )?))
-                }
-                "wait-for" => {
-                    parsed.wait_for = Some(option_value(args, &mut index, inline, "--wait-for")?)
-                }
-                "main-fallback" => {
-                    let value = option_value(args, &mut index, inline, "--main-fallback")?;
-                    if value != "full" {
-                        return Err("--main-fallback accepts only full".into());
-                    }
-                    parsed.main_fallback_full = true;
-                }
-                // Accepted no-op: curl's compressed-transfer request.
-                "compressed" => {}
-                "select" => {
-                    parsed.select = Some(option_value(args, &mut index, inline, "--select")?)
-                }
-                "row" => parsed.row = Some(option_value(args, &mut index, inline, "--row")?),
-                "locate" => {
-                    parsed.locate = Some(option_value(args, &mut index, inline, "--locate")?)
-                }
-                "where" => parsed.where_ = Some(option_value(args, &mut index, inline, "--where")?),
-                "method" => {
-                    parsed.method = Some(option_value(args, &mut index, inline, "--method")?)
-                }
-                "user" => {
-                    let value = option_value(args, &mut index, inline, "--user")?;
-                    parsed.basic_auth = Some(parse_basic_auth(&value));
-                }
-                "output" => {
-                    parsed.output = Some(PathBuf::from(option_value(
-                        args, &mut index, inline, "--output",
-                    )?));
-                }
-                "max-time" => {
-                    let value = option_value(args, &mut index, inline, "--max-time")?;
-                    parsed.max_time = Some(parse_seconds(&value)?);
-                }
-                "max-bytes" => {
-                    let value = option_value(args, &mut index, inline, "--max-bytes")?;
-                    parsed.max_bytes = Some(parse_usize(&value, "--max-bytes")?);
-                }
-                "limit" => {
-                    let value = option_value(args, &mut index, inline, "--limit")?;
-                    parsed.limit = Some(parse_usize(&value, "--limit")?);
-                }
-                "budget" => {
-                    let value = option_value(args, &mut index, inline, "--budget")?;
-                    parsed.budget = Some(parse_usize(&value, "--budget")?);
-                }
-                "offset" => {
-                    let value = option_value(args, &mut index, inline, "--offset")?;
-                    parsed.offset = parse_usize(&value, "--offset")?;
-                }
-                "header" => {
-                    let value = option_value(args, &mut index, inline, "--header")?;
-                    parsed.headers.push(parse_header(&value)?);
-                }
-                "data" => {
-                    let value = option_value(args, &mut index, inline, "--data")?;
-                    add_data(&mut parsed, &value, DataMode::Strip)?;
-                }
-                "data-raw" => {
-                    let value = option_value(args, &mut index, inline, "--data-raw")?;
-                    add_data(&mut parsed, &value, DataMode::Raw)?;
-                }
-                "data-binary" => {
-                    let value = option_value(args, &mut index, inline, "--data-binary")?;
-                    add_data(&mut parsed, &value, DataMode::Binary)?;
-                }
-                "help" => return Ok(None),
-                other => return Err(format!("unknown option: --{other}")),
-            }
-            continue;
-        }
-
-        if arg.len() > 1 && arg.starts_with('-') {
-            let chars: Vec<char> = arg[1..].chars().collect();
-            let mut position = 0;
-            while position < chars.len() {
-                let flag = chars[position];
-                match flag {
-                    'X' | 'd' | 'u' | 'o' | 'm' => {
-                        let rest: String = chars[position + 1..].iter().collect();
-                        let value = if rest.is_empty() {
-                            next_value(args, &mut index, "-")?.to_owned()
-                        } else {
-                            rest
-                        };
-                        match flag {
-                            'X' => parsed.method = Some(value),
-                            'd' => add_data(&mut parsed, &value, DataMode::Strip)?,
-                            'u' => parsed.basic_auth = Some(parse_basic_auth(&value)),
-                            'o' => parsed.output = Some(PathBuf::from(value)),
-                            'm' => parsed.max_time = Some(parse_seconds(&value)?),
-                            _ => unreachable!(),
-                        }
-                        break;
-                    }
-                    'I' => parsed.head = true,
-                    'k' => parsed.insecure = true,
-                    'f' => parsed.fail = true,
-                    // Accepted no-ops: follow redirects, include headers, silent.
-                    'L' | 'i' | 's' | 'S' => {}
-                    'h' => return Ok(None),
-                    other => return Err(format!("unknown option: -{other}")),
-                }
-                position += 1;
-            }
-            continue;
-        }
-
-        if !parsed.input.is_empty() {
-            return Err(format!("unexpected argument: {arg}"));
-        }
-        parsed.input = arg.to_owned();
     }
 
     if parsed.input.is_empty() {
@@ -1060,26 +1116,6 @@ fn parse_fetch_args(args: &[String]) -> Result<Option<FetchArgs>, String> {
     }
 
     Ok(Some(parsed))
-}
-
-fn option_value(
-    args: &[String],
-    index: &mut usize,
-    inline: Option<String>,
-    flag: &str,
-) -> Result<String, String> {
-    match inline {
-        Some(value) => Ok(value),
-        None => Ok(next_value(args, index, flag)?.to_owned()),
-    }
-}
-
-fn next_value<'a>(args: &'a [String], index: &mut usize, flag: &str) -> Result<&'a str, String> {
-    let value = args
-        .get(*index)
-        .ok_or_else(|| format!("{flag} requires a value"))?;
-    *index += 1;
-    Ok(value)
 }
 
 fn add_data(parsed: &mut FetchArgs, value: &str, mode: DataMode) -> Result<(), String> {

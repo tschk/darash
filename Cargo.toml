@@ -25,6 +25,7 @@ tokio-tungstenite = { version = "0.28", optional = true, default-features = fals
 tempfile = { version = "3", optional = true }
 base64 = { version = "0.22", optional = true }
 libc = { version = "0.2", optional = true }
+lexopt = "0.3.2"
 
 [features]
 default = ["client", "search"]
