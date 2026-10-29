@@ -1543,4 +1543,34 @@ mod tests {
         let past_empty = paginate(0, 5, 50);
         assert_eq!(past_empty.state, PageState::PastEnd);
     }
+
+    #[tokio::test]
+    async fn local_reports_reject_files_larger_than_max_body_bytes() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("darash-fetch-large-test-{}.html", fastrand::u32(..)));
+
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .expect("creates temporary file");
+
+        // Write FETCH_MAX_BODY_BYTES + 1 bytes. We don't want to actually allocate a huge slice,
+        // so we'll just write chunks or seek. Seeking to the end and writing 1 byte works!
+        // But it creates a sparse file. Let's make sure tokio::fs::read still sees the size.
+        // Actually, just allocating a 2MB + 1 vec is fine for a test, or writing chunks.
+        let bytes_to_write = FETCH_MAX_BODY_BYTES + 1;
+        // Let's use truncate to make a sparse file quickly, which is sufficient.
+        file.set_len(bytes_to_write as u64).expect("sets length");
+        drop(file); // Ensure the file is closed
+
+        let result = read_source(&path).await;
+
+        assert!(matches!(
+            result,
+            Err(Error::FetchBodyTooLarge { limit: FETCH_MAX_BODY_BYTES })
+        ));
+
+        std::fs::remove_file(&path).ok();
+    }
 }
