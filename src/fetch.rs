@@ -514,7 +514,7 @@ fn collapse_ws(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut words = text.split_whitespace();
 
-    let starts_with_ws = text.chars().next().map_or(false, char::is_whitespace);
+    let starts_with_ws = text.chars().next().is_some_and(char::is_whitespace);
     if starts_with_ws {
         out.push(' ');
     }
@@ -526,7 +526,7 @@ fn collapse_ws(text: &str) -> String {
             out.push_str(word);
         }
 
-        let ends_with_ws = text.chars().next_back().map_or(false, char::is_whitespace);
+        let ends_with_ws = text.chars().next_back().is_some_and(char::is_whitespace);
         if ends_with_ws {
             out.push(' ');
         }
