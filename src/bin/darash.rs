@@ -534,26 +534,25 @@ fn build_records(
                 0 => Ok((Vec::new(), Vec::new(), false)),
                 1 => {
                     let table = tables.into_iter().next().expect("one table");
-                    let headers = table.headers.clone();
+                    let default_cell = String::new();
                     let records = table
                         .rows
                         .into_iter()
                         .map(|row| {
-                            let cells = row.clone();
                             let mut object = serde_json::Map::new();
-                            for (index, header) in headers.iter().enumerate() {
+                            for (index, header) in table.headers.iter().enumerate() {
                                 object.insert(
                                     header.clone(),
-                                    json!(row.get(index).cloned().unwrap_or_default()),
+                                    json!(row.get(index).unwrap_or(&default_cell)),
                                 );
                             }
                             Record {
                                 json: Value::Object(object),
-                                cells,
+                                cells: row,
                             }
                         })
                         .collect();
-                    Ok((records, headers, false))
+                    Ok((records, table.headers, false))
                 }
                 _ => {
                     if args.where_.is_some() {
