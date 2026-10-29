@@ -36,6 +36,7 @@ search = ["client"]
 browser = ["client", "dep:tokio-tungstenite", "dep:tempfile", "dep:base64", "dep:libc", "tokio/process", "tokio/net", "tokio/time", "tokio/io-util"]
 
 [dev-dependencies]
+tempfile = "3"
 criterion = { version = "0.5", features = ["async_tokio"] }
 
 [[bin]]
