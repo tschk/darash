@@ -539,14 +539,14 @@ fn build_records(
                         .rows
                         .into_iter()
                         .map(|row| {
-                            let cells = row.clone();
                             let mut object = serde_json::Map::new();
                             for (index, header) in headers.iter().enumerate() {
                                 object.insert(
                                     header.clone(),
-                                    json!(row.get(index).cloned().unwrap_or_default()),
+                                    json!(row.get(index).map(String::as_str).unwrap_or_default()),
                                 );
                             }
+                            let cells = row;
                             Record {
                                 json: Value::Object(object),
                                 cells,
