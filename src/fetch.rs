@@ -511,22 +511,24 @@ fn finish_document(out: &mut String) {
 /// Collapse whitespace runs to single spaces while keeping boundary spaces so
 /// adjacent inline nodes stay separated; callers trim where needed.
 fn collapse_ws(text: &str) -> String {
-    let mut out = String::new();
-    let mut pending_space = false;
-    for ch in text.chars() {
-        if ch.is_whitespace() {
-            pending_space = true;
-        } else {
-            if pending_space {
-                out.push(' ');
-            }
-            pending_space = false;
-            out.push(ch);
-        }
-    }
-    if pending_space {
+    let mut out = String::with_capacity(text.len());
+    let mut words = text.split_whitespace();
+
+    if text.starts_with(char::is_whitespace) {
         out.push(' ');
     }
+
+    if let Some(first) = words.next() {
+        out.push_str(first);
+        for word in words {
+            out.push(' ');
+            out.push_str(word);
+        }
+        if text.ends_with(char::is_whitespace) {
+            out.push(' ');
+        }
+    }
+
     out
 }
 
