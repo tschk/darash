@@ -352,10 +352,20 @@ impl Drop for BrowserProcess {
 fn kill_process_group(process_group: Option<u32>) {
     #[cfg(unix)]
     if let Some(pid) = process_group {
-        // SAFETY: launch creates a new process group whose ID is the owned child
-        // PID. A negative PID targets that group, never the caller's process group.
-        unsafe {
-            libc::kill(-(pid as i32), libc::SIGKILL);
+        let pgid = pid as i32;
+        if pgid > 1 {
+            // SAFETY: launch creates a new process group whose ID is the owned child
+            // PID. A negative PID > 1 targets that group, never the caller's process group
+            // or all processes (-1).
+            unsafe {
+                libc::kill(-pgid, libc::SIGKILL);
+            }
+        } else if pgid > 0 {
+            // Fallback for PID 1, though unlikely for an owned child. Sends signal
+            // directly to the process to avoid `-1` broadcasting.
+            unsafe {
+                libc::kill(pgid, libc::SIGKILL);
+            }
         }
     }
     #[cfg(not(unix))]
@@ -988,8 +998,13 @@ mod tests {
         process.close().await;
         assert!(!profile_path.exists());
         for _ in 0..100 {
+            let pgid = group as i32;
+            assert!(
+                pgid > 1,
+                "test process group ID must be > 1 to avoid broadcasting"
+            );
             // SAFETY: signal 0 only checks existence of this owned process group.
-            if unsafe { libc::kill(-(group as i32), 0) } == -1 {
+            if unsafe { libc::kill(-pgid, 0) } == -1 {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -1121,12 +1136,19 @@ mod tests {
         }
         assert!(!profile.exists(), "temporary profile survived cancellation");
         #[cfg(unix)]
-        // SAFETY: signal 0 only checks existence of the owned process group.
-        assert_eq!(
-            unsafe { libc::kill(-(pid as i32), 0) },
-            -1,
-            "browser process group survived cancellation"
-        );
+        {
+            let pgid = pid as i32;
+            assert!(
+                pgid > 1,
+                "test process group ID must be > 1 to avoid broadcasting"
+            );
+            // SAFETY: signal 0 only checks existence of the owned process group.
+            assert_eq!(
+                unsafe { libc::kill(-pgid, 0) },
+                -1,
+                "browser process group survived cancellation"
+            );
+        }
         let fixture = Fixture::start().await;
         assert!(matches!(
             fixture
@@ -1162,5 +1184,14 @@ mod tests {
             .unwrap()
             .iter()
             .any(|request| request.contains("/secret")));
+    }
+
+    #[test]
+    fn test_kill_process_group_safe_against_broadcasting() {
+        // If the vulnerability exists, passing 0 or 1 could respectively kill the test runner's
+        // process group (via kill(0, SIGKILL)) or indiscriminately kill all allowed processes
+        // (via kill(-1, SIGKILL)). We ensure this does not happen.
+        kill_process_group(Some(0));
+        kill_process_group(Some(1));
     }
 }
