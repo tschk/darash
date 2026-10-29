@@ -166,25 +166,6 @@ async fn run_search(args: SearchArgs) -> Result<(), String> {
 async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     let extraction = pick_extraction(&args)?;
     validate_page_options(&args, extraction)?;
-    let structured = matches!(
-        extraction,
-        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
-    );
-
-    if args.count && extraction != Extraction::Select {
-        return Err("--count requires --select".to_owned());
-    }
-    if !structured && (args.offset > 0 || args.json_envelope) {
-        return Err(
-            "--offset/--json-envelope apply to --select, --row, --table, or --locate".to_owned(),
-        );
-    }
-    if args.where_.is_some() && !matches!(extraction, Extraction::Row | Extraction::Table) {
-        return Err("--where applies to --row or --table output".to_owned());
-    }
-    if args.output.is_some() && !matches!(extraction, Extraction::Report | Extraction::Body) {
-        return Err("--output/-o applies only to the default report or --body".to_owned());
-    }
 
     let is_url = args.input.starts_with("http://") || args.input.starts_with("https://");
     let method = args.method.clone().unwrap_or_else(|| "GET".to_owned());
@@ -218,17 +199,25 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         return Ok(fail_code(&args, &report));
     }
 
+    process_extraction(extraction, &args, &report)
+}
+
+fn process_extraction(
+    extraction: Extraction,
+    args: &FetchArgs,
+    report: &FetchReport,
+) -> Result<i32, String> {
     match extraction {
         Extraction::Report => {
             let rendered =
                 serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
             println!("{rendered}");
-            return Ok(fail_code(&args, &report));
+            return Ok(fail_code(args, report));
         }
         Extraction::Body => {
             eprintln!("darash fetch: {}", report.summary());
             println!("{}", report.body);
-            return Ok(fail_code(&args, &report));
+            return Ok(fail_code(args, report));
         }
         Extraction::Markdown | Extraction::Text => {
             let main = if args.main_content {
@@ -254,8 +243,8 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
                 fetch::to_text(html)
             };
             eprintln!("darash fetch: {}", report.summary());
-            emit_document(rendered, &report, args.budget, args.json);
-            return Ok(fail_code(&args, &report));
+            emit_document(rendered, report, args.budget, args.json);
+            return Ok(fail_code(args, report));
         }
         Extraction::Outline => {
             let entries = fetch::outline(&report.body);
@@ -281,16 +270,16 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
                 );
             }
             if args.json {
-                emit_json(data, &report, budgeted.items.len(), omitted);
+                emit_json(data, report, budgeted.items.len(), omitted);
             } else {
                 emit_plain(&budgeted.items);
             }
-            return Ok(fail_code(&args, &report));
+            return Ok(fail_code(args, report));
         }
         Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {}
     }
 
-    let (records, headers, force_json) = build_records(extraction, &args, &report)?;
+    let (records, headers, force_json) = build_records(extraction, args, report)?;
     if extraction == Extraction::Select && args.count {
         let selector = args.select.as_deref().unwrap_or_default();
         if records.is_empty() {
@@ -365,7 +354,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     } else if args.json {
         emit_json(
             data,
-            &report,
+            report,
             meta.returned,
             meta.total.saturating_sub(meta.returned),
         );
@@ -380,7 +369,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         }
         emit_plain(&budgeted.items);
     }
-    Ok(fail_code(&args, &report))
+    Ok(fail_code(args, report))
 }
 
 async fn fetch_report(
@@ -442,6 +431,26 @@ async fn fetch_report(
 }
 
 fn validate_page_options(args: &FetchArgs, extraction: Extraction) -> Result<(), String> {
+    let structured = matches!(
+        extraction,
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
+    );
+
+    if args.count && extraction != Extraction::Select {
+        return Err("--count requires --select".to_owned());
+    }
+    if !structured && (args.offset > 0 || args.json_envelope) {
+        return Err(
+            "--offset/--json-envelope apply to --select, --row, --table, or --locate".to_owned(),
+        );
+    }
+    if args.where_.is_some() && !matches!(extraction, Extraction::Row | Extraction::Table) {
+        return Err("--where applies to --row or --table output".to_owned());
+    }
+    if args.output.is_some() && !matches!(extraction, Extraction::Report | Extraction::Body) {
+        return Err("--output/-o applies only to the default report or --body".to_owned());
+    }
+
     if args.main_content && !matches!(extraction, Extraction::Markdown | Extraction::Text) {
         return Err("--main-content requires --md or --text".into());
     }
