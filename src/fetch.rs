@@ -1444,7 +1444,11 @@ mod tests {
     #[tokio::test]
     async fn read_source_rejects_files_exceeding_max_body_bytes() {
         let mut path = std::env::temp_dir();
-        path.push(format!("darash-fetch-too-large-{}-{}.html", std::process::id(), fastrand::u64(..)));
+        path.push(format!(
+            "darash-fetch-too-large-{}-{}.html",
+            std::process::id(),
+            fastrand::u64(..)
+        ));
 
         let mut file = std::fs::File::create(&path).unwrap();
         let chunk = vec![b'A'; 1024];
@@ -1466,7 +1470,6 @@ mod tests {
 
         std::fs::remove_file(&path).ok();
     }
-
 
     #[tokio::test]
     async fn fetch_rejects_non_http_schemes() {
