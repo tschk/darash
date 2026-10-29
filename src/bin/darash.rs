@@ -539,7 +539,6 @@ fn build_records(
                         .rows
                         .into_iter()
                         .map(|row| {
-                            let cells = row.clone();
                             let mut object = serde_json::Map::new();
                             for (index, header) in headers.iter().enumerate() {
                                 object.insert(
@@ -549,10 +548,11 @@ fn build_records(
                             }
                             Record {
                                 json: Value::Object(object),
-                                cells,
+                                cells: row,
                             }
                         })
                         .collect();
+
                     Ok((records, headers, false))
                 }
                 _ => {
