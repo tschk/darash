@@ -332,7 +332,10 @@ mod tests {
     #[tokio::test]
     async fn load_returns_none_for_invalid_json() {
         use std::time::{SystemTime, UNIX_EPOCH};
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let url = format!("https://example.com/invalid_json_{}", now);
 
         let Some(cache_dir_path) = cache_dir() else {
