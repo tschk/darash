@@ -73,7 +73,7 @@ pub fn extract_main_content(
             // Semantic landmarks may contain a short title, code, or a table.
             // Unmarked content must contain substantial prose in two paragraphs.
             if source == MainContentSource::Prose
-                && (score < 160 || candidate.select(&paragraphs).count() < 2)
+                && (score < 160 || candidate.select(&paragraphs).nth(1).is_none())
             {
                 continue;
             }
