@@ -352,10 +352,12 @@ impl Drop for BrowserProcess {
 fn kill_process_group(process_group: Option<u32>) {
     #[cfg(unix)]
     if let Some(pid) = process_group {
-        // SAFETY: launch creates a new process group whose ID is the owned child
-        // PID. A negative PID targets that group, never the caller's process group.
-        unsafe {
-            libc::kill(-(pid as i32), libc::SIGKILL);
+        if pid > 1 && pid <= i32::MAX as u32 {
+            // SAFETY: launch creates a new process group whose ID is the owned child
+            // PID. A negative PID targets that group, never the caller's process group.
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
         }
     }
     #[cfg(not(unix))]
@@ -989,7 +991,12 @@ mod tests {
         assert!(!profile_path.exists());
         for _ in 0..100 {
             // SAFETY: signal 0 only checks existence of this owned process group.
-            if unsafe { libc::kill(-(group as i32), 0) } == -1 {
+            if (if group > 1 && group <= i32::MAX as u32 {
+                unsafe { libc::kill(-(group as i32), 0) }
+            } else {
+                -1
+            }) == -1
+            {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -1123,7 +1130,11 @@ mod tests {
         #[cfg(unix)]
         // SAFETY: signal 0 only checks existence of the owned process group.
         assert_eq!(
-            unsafe { libc::kill(-(pid as i32), 0) },
+            if pid > 1 && pid <= i32::MAX as u32 {
+                unsafe { libc::kill(-(pid as i32), 0) }
+            } else {
+                -1
+            },
             -1,
             "browser process group survived cancellation"
         );
