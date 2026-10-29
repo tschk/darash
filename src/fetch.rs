@@ -1445,12 +1445,18 @@ mod tests {
     #[tokio::test]
     async fn read_source_rejects_large_files() {
         let mut path = std::env::temp_dir();
-        path.push(format!("darash-fetch-test-large-{}.html", std::process::id()));
+        path.push(format!(
+            "darash-fetch-test-large-{}.html",
+            std::process::id()
+        ));
 
         let file = std::fs::File::create(&path).expect("fixture creates");
-        file.set_len((FETCH_MAX_BODY_BYTES + 1) as u64).expect("fixture truncates");
+        file.set_len((FETCH_MAX_BODY_BYTES + 1) as u64)
+            .expect("fixture truncates");
 
-        let error = read_source(&path).await.expect_err("fixture rejects large file");
+        let error = read_source(&path)
+            .await
+            .expect_err("fixture rejects large file");
 
         assert!(matches!(
             error,
