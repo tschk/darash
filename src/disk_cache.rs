@@ -328,4 +328,22 @@ mod tests {
         assert!(is_credential_param("apiKey"));
         assert!(!is_credential_param("monkey"));
     }
+
+    #[tokio::test]
+    async fn load_invalid_json_returns_none() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let cache_dir = tmp_dir.path().join("darash").join("fetch");
+        tokio::fs::create_dir_all(&cache_dir).await.unwrap();
+
+        std::env::set_var("XDG_CACHE_HOME", tmp_dir.path());
+
+        let url = "https://example.com/invalid";
+        let key = cache_key(url);
+        let path = cache_dir.join(format!("{}.json", key));
+
+        tokio::fs::write(&path, b"{invalid json").await.unwrap();
+
+        let result = load(url).await;
+        assert!(result.is_none());
+    }
 }
