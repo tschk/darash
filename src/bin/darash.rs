@@ -165,7 +165,27 @@ async fn run_search(args: SearchArgs) -> Result<(), String> {
 
 async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     let extraction = pick_extraction(&args)?;
-    validate_page_options(&args, extraction)?;
+    validate_extraction_args(&args, extraction)?;
+
+    let report = get_fetch_report(&args).await?;
+
+    if let Some(path) = &args.output {
+        atomic_write(path, report.body.as_bytes())
+            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+        eprintln!("darash fetch: {}", report.summary());
+        return Ok(fail_code(&args, &report));
+    }
+
+    match extraction {
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {
+            handle_structured_extraction(extraction, &args, &report)
+        }
+        _ => handle_document_extraction(extraction, &args, &report),
+    }
+}
+
+fn validate_extraction_args(args: &FetchArgs, extraction: Extraction) -> Result<(), String> {
+    validate_page_options(args, extraction)?;
     let structured = matches!(
         extraction,
         Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
@@ -185,7 +205,10 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     if args.output.is_some() && !matches!(extraction, Extraction::Report | Extraction::Body) {
         return Err("--output/-o applies only to the default report or --body".to_owned());
     }
+    Ok(())
+}
 
+async fn get_fetch_report(args: &FetchArgs) -> Result<FetchReport, String> {
     let is_url = args.input.starts_with("http://") || args.input.starts_with("https://");
     let method = args.method.clone().unwrap_or_else(|| "GET".to_owned());
     let no_store = args.headers.iter().any(|(name, value)| {
@@ -203,32 +226,31 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
             no_store,
         );
 
-    let report = if is_url {
-        fetch_report(&args, &method, cacheable).await?
+    if is_url {
+        fetch_report(args, &method, cacheable).await
     } else {
         fetch::read_source(&args.input)
             .await
-            .map_err(|error| error.to_string())?
-    };
-
-    if let Some(path) = &args.output {
-        atomic_write(path, report.body.as_bytes())
-            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-        eprintln!("darash fetch: {}", report.summary());
-        return Ok(fail_code(&args, &report));
+            .map_err(|error| error.to_string())
     }
+}
 
+fn handle_document_extraction(
+    extraction: Extraction,
+    args: &FetchArgs,
+    report: &FetchReport,
+) -> Result<i32, String> {
     match extraction {
         Extraction::Report => {
             let rendered =
                 serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
             println!("{rendered}");
-            return Ok(fail_code(&args, &report));
+            Ok(fail_code(args, report))
         }
         Extraction::Body => {
             eprintln!("darash fetch: {}", report.summary());
             println!("{}", report.body);
-            return Ok(fail_code(&args, &report));
+            Ok(fail_code(args, report))
         }
         Extraction::Markdown | Extraction::Text => {
             let main = if args.main_content {
@@ -254,8 +276,8 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
                 fetch::to_text(html)
             };
             eprintln!("darash fetch: {}", report.summary());
-            emit_document(rendered, &report, args.budget, args.json);
-            return Ok(fail_code(&args, &report));
+            emit_document(rendered, report, args.budget, args.json);
+            Ok(fail_code(args, report))
         }
         Extraction::Outline => {
             let entries = fetch::outline(&report.body);
@@ -281,16 +303,22 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
                 );
             }
             if args.json {
-                emit_json(data, &report, budgeted.items.len(), omitted);
+                emit_json(data, report, budgeted.items.len(), omitted);
             } else {
                 emit_plain(&budgeted.items);
             }
-            return Ok(fail_code(&args, &report));
+            Ok(fail_code(args, report))
         }
-        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {}
+        _ => unreachable!(),
     }
+}
 
-    let (records, headers, force_json) = build_records(extraction, &args, &report)?;
+fn handle_structured_extraction(
+    extraction: Extraction,
+    args: &FetchArgs,
+    report: &FetchReport,
+) -> Result<i32, String> {
+    let (records, headers, force_json) = build_records(extraction, args, report)?;
     if extraction == Extraction::Select && args.count {
         let selector = args.select.as_deref().unwrap_or_default();
         if records.is_empty() {
@@ -365,7 +393,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     } else if args.json {
         emit_json(
             data,
-            &report,
+            report,
             meta.returned,
             meta.total.saturating_sub(meta.returned),
         );
@@ -380,7 +408,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         }
         emit_plain(&budgeted.items);
     }
-    Ok(fail_code(&args, &report))
+    Ok(fail_code(args, report))
 }
 
 async fn fetch_report(
