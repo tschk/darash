@@ -1428,6 +1428,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_source_rejects_files_larger_than_max_body_bytes() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("darash-fetch-large-test-{}.txt", std::process::id()));
+
+        let size = FETCH_MAX_BODY_BYTES + 1;
+        let data = vec![b'A'; size];
+        std::fs::write(&path, &data).expect("fixture writes");
+
+        let result = read_source(&path).await;
+
+        match result {
+            Err(crate::Error::FetchBodyTooLarge { limit }) => {
+                assert_eq!(limit, FETCH_MAX_BODY_BYTES);
+            }
+            other => panic!("expected FetchBodyTooLarge, got {:?}", other),
+        }
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
     async fn local_reports_read_files_without_http() {
         let mut path = std::env::temp_dir();
         path.push(format!("darash-fetch-test-{}.html", std::process::id()));
