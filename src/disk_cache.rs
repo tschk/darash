@@ -26,6 +26,7 @@ pub const CACHE_TTL_SECS: u64 = 120;
 
 #[derive(Serialize, Deserialize)]
 struct CachedFetch {
+    cache_version: u8,
     fetched_at: u64,
     report: FetchReport,
 }
@@ -58,6 +59,9 @@ pub async fn load(url: &str) -> Option<(FetchReport, u64)> {
     let path = dir.join(format!("{}.json", cache_key(url)));
     let bytes = fs::read(&path).await.ok()?;
     let cached: CachedFetch = serde_json::from_slice(&bytes).ok()?;
+    if cached.cache_version != 1 {
+        return None;
+    }
     let now = now_secs();
     let age = now.saturating_sub(cached.fetched_at);
     if age > CACHE_TTL_SECS {
@@ -65,6 +69,13 @@ pub async fn load(url: &str) -> Option<(FetchReport, u64)> {
         return None;
     }
     Some((cached.report, age))
+}
+
+/// Remove a cached report for `url`, if present.
+pub async fn remove(url: &str) {
+    if let Some(dir) = cache_dir() {
+        let _ = fs::remove_file(dir.join(format!("{}.json", cache_key(url)))).await;
+    }
 }
 
 /// Store a report for `url`, atomically and with `0600` permissions.
@@ -75,6 +86,7 @@ pub async fn store(url: &str, report: &FetchReport) -> Option<()> {
     fs::create_dir_all(&dir).await.ok()?;
     sweep(&dir).await;
     let cached = CachedFetch {
+        cache_version: 1,
         fetched_at: now_secs(),
         report: report.clone(),
     };
