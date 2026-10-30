@@ -195,6 +195,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
     let cacheable = is_url
         && !args.render
         && !args.no_cache
+        && args.basic_auth.is_none()
         && disk_cache::should_cache(
             &args.input,
             &method,
@@ -432,11 +433,15 @@ async fn fetch_report(
         timeout: args.max_time,
         max_bytes: args.max_bytes,
     };
-    let report = fetch::fetch_with(&args.input, &options)
+    let (report, no_store) = fetch::fetch_with_cache_policy(&args.input, &options)
         .await
         .map_err(|error| error.to_string())?;
     if cacheable {
-        let _ = disk_cache::store(&args.input, &report).await;
+        if no_store {
+            disk_cache::remove(&args.input).await;
+        } else {
+            let _ = disk_cache::store(&args.input, &report).await;
+        }
     }
     Ok(report)
 }
