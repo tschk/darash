@@ -251,7 +251,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
             let rendered = if extraction == Extraction::Markdown {
                 fetch::to_markdown(html)
             } else {
-                fetch::to_text(html)
+                escape_control_characters(&fetch::to_text(html))
             };
             eprintln!("darash fetch: {}", report.summary());
             emit_document(rendered, &report, args.budget, args.json);
@@ -270,7 +270,6 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
                     )
                 })
                 .collect::<Vec<_>>();
-            let data = serde_json::to_value(&entries).map_err(|error| error.to_string())?;
             let (limited, limit_omitted) = cap(items, args.limit.unwrap_or(DEFAULT_FETCH_LIMIT));
             let budgeted = fetch::apply_budget(limited, args.budget);
             let omitted = limit_omitted + budgeted.omitted;
@@ -281,6 +280,8 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
                 );
             }
             if args.json {
+                let data = serde_json::to_value(&entries[..budgeted.items.len()])
+                    .map_err(|error| error.to_string())?;
                 emit_json(data, &report, budgeted.items.len(), omitted);
             } else {
                 emit_plain(&budgeted.items);
@@ -319,16 +320,24 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         None => records.iter().collect(),
     };
     let total = filtered.len();
-    let meta = fetch::paginate(
+    let mut meta = fetch::paginate(
         total,
         args.offset,
         args.limit.unwrap_or(DEFAULT_FETCH_LIMIT),
     );
-    let page: Vec<&Record> = if meta.state == PageState::PastEnd {
+    let mut page: Vec<&Record> = if meta.state == PageState::PastEnd {
         Vec::new()
     } else {
         filtered[meta.offset..meta.offset + meta.returned].to_vec()
     };
+    if args.budget.is_some() && (args.json || args.json_envelope || force_json) {
+        let items = page.iter().map(|record| record.json.to_string()).collect();
+        let budgeted = fetch::apply_budget(items, args.budget);
+        if budgeted.omitted > 0 {
+            page.truncate(budgeted.items.len());
+            meta = fetch::paginate(total, args.offset, page.len());
+        }
+    }
     let data = Value::Array(page.iter().map(|record| record.json.clone()).collect());
 
     eprintln!("darash fetch: {}", report.summary());
@@ -597,12 +606,12 @@ fn emit_document(rendered: String, report: &FetchReport, budget: Option<usize>, 
     if rendered.is_empty() {
         eprintln!("darash fetch: no content extracted");
     }
-    if json {
-        emit_json(json!(rendered), report, 1, 0);
-        return;
-    }
     let Some(budget) = budget else {
-        println!("{rendered}");
+        if json {
+            emit_json(json!(rendered), report, 1, 0);
+        } else {
+            println!("{rendered}");
+        }
         return;
     };
     let blocks = rendered
@@ -616,7 +625,12 @@ fn emit_document(rendered: String, report: &FetchReport, budget: Option<usize>, 
             budgeted.omitted
         );
     }
-    println!("{}", budgeted.items.join("\n\n"));
+    let rendered = budgeted.items.join("\n\n");
+    if json {
+        emit_json(json!(rendered), report, 1, budgeted.omitted);
+    } else {
+        println!("{rendered}");
+    }
 }
 
 fn emit_json(data: Value, report: &FetchReport, count: usize, omitted: usize) {
@@ -1131,8 +1145,7 @@ fn parse_seconds(value: &str) -> Result<Duration, String> {
     value
         .parse::<f64>()
         .ok()
-        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
-        .map(Duration::from_secs_f64)
+        .and_then(|seconds| Duration::try_from_secs_f64(seconds).ok())
         .ok_or_else(|| format!("--max-time expects seconds, got {value:?}"))
 }
 
@@ -1174,7 +1187,7 @@ fn parse_source(value: &str) -> Result<SearchSource, String> {
 fn escape_control_characters(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        if c.is_control() && c != '\n' && c != '\r' && c != '\t' {
+        if c.is_control() && c != '\n' && c != '\t' {
             out.extend(c.escape_default());
         } else {
             out.push(c);
