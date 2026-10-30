@@ -301,8 +301,9 @@ error exits 22 after printing the report). `-L`, `-i`, `-s`, and `-S` are
 accepted no-ops. Fetched URL bodies are cached for about two minutes under the
 user's cache directory and reused by parse modes; `--fresh` refetches and
 re-caches, `--no-cache` never reads or writes, and credential-bearing URLs,
-custom headers, non-`GET` methods, request bodies, and `Cache-Control: no-store`
-bypass the cache. Cache hits announce their age on stderr.
+Basic Auth, custom headers, non-`GET` methods, and request bodies bypass the
+cache. Responses with `Cache-Control: no-store` are not stored. Cache hits
+announce their age on stderr.
 
 Extraction output is capped at 50 items by default (`--limit`) and can be
 further bounded with `--budget` (estimated tokens, cut at item boundaries);

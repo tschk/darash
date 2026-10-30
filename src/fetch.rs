@@ -118,6 +118,17 @@ pub async fn fetch_with(
     url: impl AsRef<str>,
     options: &FetchOptions,
 ) -> Result<FetchReport, Error> {
+    fetch_with_cache_policy(url, options)
+        .await
+        .map(|(report, _)| report)
+}
+
+/// Fetch a report and indicate whether the origin forbids storing its response.
+#[cfg(feature = "client")]
+pub async fn fetch_with_cache_policy(
+    url: impl AsRef<str>,
+    options: &FetchOptions,
+) -> Result<(FetchReport, bool), Error> {
     let parsed = ::url::Url::parse(url.as_ref()).map_err(|error| {
         Error::InvalidEndpoint(format!("{} is not a valid URL: {error}", url.as_ref()))
     })?;
@@ -171,6 +182,13 @@ pub async fn fetch_with(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(|value| value.to_owned());
+    let no_store = response
+        .headers()
+        .get_all(reqwest::header::CACHE_CONTROL)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .any(|directive| directive.trim().eq_ignore_ascii_case("no-store"));
 
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(Error::Fetch)? {
@@ -181,16 +199,19 @@ pub async fn fetch_with(
     }
     let body = String::from_utf8_lossy(&bytes).into_owned();
 
-    Ok(FetchReport {
-        status: Some(status.as_u16()),
-        ok: status.is_success(),
-        url: final_url,
-        redirected,
-        ms: started.elapsed().as_millis() as u64,
-        content_type,
-        bytes: body.len(),
-        body,
-    })
+    Ok((
+        FetchReport {
+            status: Some(status.as_u16()),
+            ok: status.is_success(),
+            url: final_url,
+            redirected,
+            ms: started.elapsed().as_millis() as u64,
+            content_type,
+            bytes: body.len(),
+            body,
+        },
+        no_store,
+    ))
 }
 
 /// Render mode shared by the HTML renderer.
