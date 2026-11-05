@@ -114,6 +114,27 @@ requested constraint was applied or that all requested sources were searched.
 Hosts should inspect provider status and treat snippets as untrusted source
 material, not instructions.
 
+### Privacy and local-file boundaries
+
+- The former unbounded local-file read was a resource-exhaustion bug: search
+  does not itself pass queries or provider responses to the file reader. The
+  2 MiB limit now bounds the read, not the permitted path. Local-file fetch is
+  intentional and opens paths under the process's filesystem permissions.
+- An external search service could previously return an arbitrary local path
+  in `sources` even when results were HTTP URLs. A host that passed that citation
+  into the CLI fetch command could disclose a readable local file. Search now
+  rejects non-HTTP(S) citations as well as non-HTTP(S) results. Hosts must still
+  validate untrusted inputs and network destinations; HTTP(S) alone is not an
+  SSRF or filesystem sandbox.
+- Before the cache fix, callers sharing a cache directory and URL could receive
+  another caller's Basic Auth response because credentials were absent from the
+  key. Authenticated requests now bypass the cache and legacy entries are not
+  reused. The URL-keyed cache is not a caller-isolation boundary: sharing a
+  cache directory can still reuse eligible responses whose content varies by
+  network or proxy identity. Use `--no-cache` across trust boundaries. In-flight
+  concurrent requests can also race a later `no-store` invalidation; an already
+  cached response cannot discover a changed origin policy without a refetch.
+
 ### Capability and correctness gaps
 
 - Local DuckDuckGo receives the requested time range, but the OpenAlex and
@@ -122,14 +143,13 @@ material, not instructions.
   per-provider guarantee. Do not use them to establish a date or language
   restriction across local results.
 - Speed and balanced modes limit the number of local providers, so an explicit
-  request for several sources may omit some. The limits are documented, but the
-  response does not explain which requested sources were skipped. An agent
-  cannot distinguish an unsearched source from one with no matches solely from
-  the result list.
+  request for several sources may omit some. The coverage report now identifies
+  providers skipped by the mode limit; result lists alone cannot distinguish an
+  unsearched source from one with no matches.
 - Explicit local engine names that do not match a known adapter fall back to
   category selection. A typo can therefore search the web rather than the
-  intended engine. Mixed known and unknown names silently discard the unknown
-  names.
+  intended engine. The coverage report identifies unknown engine names and the
+  providers actually selected, but does not change this fallback behavior.
 - The serializable `SearchRequest` carries mode and sources, but not the
   language, time range, pagination or safe-search options available through
   `SearchQuery`. Adding these fields without reporting provider support would

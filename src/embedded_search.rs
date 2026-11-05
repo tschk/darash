@@ -1,6 +1,7 @@
 use crate::{
-    Error, ProviderStatus, SafeSearch, SearchConfig, SearchQuery, SearchResponse, SearchResult,
-    SearchSource, TimeRange,
+    ConstraintCoverage, Error, ProviderCoverage, ProviderSelection, ProviderStatus,
+    ProviderStatusKind, SafeSearch, SearchConfig, SearchCoverage, SearchQuery, SearchResponse,
+    SearchResult, SearchSource, TimeRange,
 };
 use futures_util::future::join_all;
 use native_tls::TlsConnector;
@@ -62,6 +63,7 @@ pub(crate) async fn search_with_outcome(
                 corrections: Vec::new(),
                 suggestions: Vec::new(),
                 provider_status: Vec::new(),
+                coverage: Some(coverage(query, &[], true)),
                 filters,
             },
             failures: Vec::new(),
@@ -131,6 +133,7 @@ fn finish_search(
             sources,
             corrections: Vec::new(),
             suggestions: Vec::new(),
+            coverage: Some(coverage(query, &provider_status, false)),
             provider_status,
             filters,
         },
@@ -139,6 +142,13 @@ fn finish_search(
 }
 
 fn providers(query: &SearchQuery) -> Vec<SearchSource> {
+    requested_providers(query)
+        .into_iter()
+        .take(query.mode().provider_limit())
+        .collect()
+}
+
+fn requested_providers(query: &SearchQuery) -> Vec<SearchSource> {
     if !query.engines.is_empty() {
         let selected: Vec<SearchSource> = query
             .engines
@@ -154,10 +164,7 @@ fn providers(query: &SearchQuery) -> Vec<SearchSource> {
                 selected
             });
         if !selected.is_empty() {
-            return selected
-                .into_iter()
-                .take(query.mode().provider_limit())
-                .collect();
+            return selected;
         }
     }
     let categories = query.categories.as_deref().unwrap_or("general");
@@ -179,9 +186,71 @@ fn providers(query: &SearchQuery) -> Vec<SearchSource> {
         selected.push(SearchSource::Web);
     }
     selected
-        .into_iter()
-        .take(query.mode().provider_limit())
-        .collect()
+}
+
+fn coverage(query: &SearchQuery, statuses: &[ProviderStatus], blocked: bool) -> SearchCoverage {
+    let mut entries = Vec::new();
+    for name in &query.engines {
+        if SearchSource::from_name(name).is_none() {
+            entries.push(ProviderCoverage {
+                provider: name.clone(),
+                selection: ProviderSelection::UnknownEngine,
+                language: if query.language.is_some() {
+                    ConstraintCoverage::NotAttempted
+                } else {
+                    ConstraintCoverage::NotRequested
+                },
+                time_range: if query.time_range.is_some() {
+                    ConstraintCoverage::NotAttempted
+                } else {
+                    ConstraintCoverage::NotRequested
+                },
+            });
+        }
+    }
+    for (index, provider) in requested_providers(query).into_iter().enumerate() {
+        let selection = if index >= query.mode().provider_limit() {
+            ProviderSelection::ModeLimit
+        } else if blocked {
+            ProviderSelection::Blocked
+        } else {
+            ProviderSelection::Attempted
+        };
+        let attempted = selection == ProviderSelection::Attempted;
+        let succeeded = statuses.iter().any(|status| {
+            status.provider == provider.name() && status.status == ProviderStatusKind::Success
+        });
+        let language = if query.language.is_none() {
+            ConstraintCoverage::NotRequested
+        } else if attempted {
+            ConstraintCoverage::NotForwarded
+        } else {
+            ConstraintCoverage::NotAttempted
+        };
+        let time_range = if query.time_range.is_none() {
+            ConstraintCoverage::NotRequested
+        } else if !attempted {
+            ConstraintCoverage::NotAttempted
+        } else if provider != SearchSource::Web {
+            ConstraintCoverage::NotForwarded
+        } else if succeeded {
+            ConstraintCoverage::Forwarded
+        } else {
+            ConstraintCoverage::Unknown
+        };
+        entries.push(ProviderCoverage {
+            provider: provider.name().to_owned(),
+            selection,
+            language,
+            time_range,
+        });
+    }
+    SearchCoverage {
+        providers_known: true,
+        requested_language: query.language.clone(),
+        requested_time_range: query.time_range,
+        providers: entries,
+    }
 }
 
 fn matches_blocklist(value: &str, config: &SearchConfig) -> bool {
@@ -774,6 +843,72 @@ struct HackerNewsHit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn response_reports_selected_skipped_and_unknown_provider_constraints() {
+        let query = SearchQuery::new("rust")
+            .with_engines(["duckduckgo", "unknown", "openalex", "hn"])
+            .with_language("en")
+            .with_time_range(TimeRange::Week);
+        let config = SearchConfig::new("http://localhost:8080").unwrap();
+        let selected = providers(&query);
+        let response = finish_search(
+            &query,
+            &config,
+            &selected,
+            vec![
+                (SearchSource::Web, Ok(vec![])),
+                (
+                    SearchSource::Academic,
+                    Err(ProviderFailure::new(SearchSource::Academic, "offline")),
+                ),
+            ],
+        )
+        .unwrap()
+        .response;
+        let report = response.coverage.unwrap();
+        assert!(report.providers_known);
+        assert_eq!(report.requested_language.as_deref(), Some("en"));
+        assert_eq!(report.requested_time_range, Some(TimeRange::Week));
+        assert_eq!(
+            report
+                .providers
+                .iter()
+                .map(|entry| (
+                    entry.provider.as_str(),
+                    entry.selection,
+                    entry.language,
+                    entry.time_range
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "unknown",
+                    ProviderSelection::UnknownEngine,
+                    ConstraintCoverage::NotAttempted,
+                    ConstraintCoverage::NotAttempted
+                ),
+                (
+                    "duckduckgo",
+                    ProviderSelection::Attempted,
+                    ConstraintCoverage::NotForwarded,
+                    ConstraintCoverage::Forwarded
+                ),
+                (
+                    "openalex",
+                    ProviderSelection::Attempted,
+                    ConstraintCoverage::NotForwarded,
+                    ConstraintCoverage::NotForwarded
+                ),
+                (
+                    "hacker-news",
+                    ProviderSelection::ModeLimit,
+                    ConstraintCoverage::NotAttempted,
+                    ConstraintCoverage::NotAttempted
+                ),
+            ]
+        );
+    }
 
     #[test]
     fn empty_success_and_failure_preserve_both_provider_statuses() {

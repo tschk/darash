@@ -96,6 +96,7 @@ impl WebsurfxSearchResponse {
             corrections: Vec::new(),
             suggestions: Vec::new(),
             provider_status,
+            coverage: None,
             filters: SearchFilters {
                 safe_search_level,
                 time_range: None,

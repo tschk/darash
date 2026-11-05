@@ -186,7 +186,7 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         return Err("--output/-o applies only to the default report or --body".to_owned());
     }
 
-    let is_url = args.input.starts_with("http://") || args.input.starts_with("https://");
+    let is_url = is_http_url(&args.input);
     let method = args.method.clone().unwrap_or_else(|| "GET".to_owned());
     let no_store = args.headers.iter().any(|(name, value)| {
         name.eq_ignore_ascii_case("cache-control")
@@ -458,6 +458,12 @@ async fn fetch_report(
     Ok(report)
 }
 
+fn is_http_url(input: &str) -> bool {
+    url::Url::parse(input)
+        .ok()
+        .is_some_and(|url| matches!(url.scheme(), "http" | "https"))
+}
+
 fn validate_page_options(args: &FetchArgs, extraction: Extraction) -> Result<(), String> {
     if args.main_content && !matches!(extraction, Extraction::Markdown | Extraction::Text) {
         return Err("--main-content requires --md or --text".into());
@@ -469,7 +475,7 @@ fn validate_page_options(args: &FetchArgs, extraction: Extraction) -> Result<(),
         return Err("--browser/--wait-for require --render".into());
     }
     if args.render {
-        if !(args.input.starts_with("http://") || args.input.starts_with("https://")) {
+        if !is_http_url(&args.input) {
             return Err(
                 "--render requires an HTTP(S) URL; local files are not browser inputs".into(),
             );

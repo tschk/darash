@@ -103,6 +103,26 @@ impl Drop for Server {
 }
 
 #[test]
+fn mixed_case_http_scheme_is_fetched_as_network_url() {
+    let server = Server::new(false);
+    let url = server.url.replacen("http:", "HTTP:", 1);
+    let output = Command::new(env!("CARGO_BIN_EXE_darash"))
+        .env("XDG_CACHE_HOME", &server.cache)
+        .args(["fetch", &url, "--body"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim(),
+        "anonymous request-1"
+    );
+}
+
+#[test]
 fn basic_auth_never_reads_or_writes_the_shared_cache() {
     let server = Server::new(false);
     assert_eq!(server.fetch(&[]).trim(), "anonymous request-1");

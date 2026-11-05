@@ -109,6 +109,17 @@ in `balanced` or `quality` mode before URL deduplication and relevance ranking.
 the convenient default selection. `SearchResponse::provider_status` preserves
 success and failure information when one provider is unavailable.
 
+`SearchResponse::coverage` reports which local providers were attempted, skipped
+by the mode limit, blocked, or unrecognized, and how requested language and time
+range constraints were handled. `forwarded` means Darash sent a parameter; it
+does not prove the provider enforced it. `not_forwarded` means the adapter did
+not send it, `not_attempted` means the provider was skipped, and `unknown`
+means forwarding cannot be established. Remote SearxNG responses set
+`providers_known` to false because the server does not establish complete
+per-provider coverage. Websurfx and older serialized responses may have no
+coverage report, which also means unknown. Coverage on a cache hit describes
+the original search; an all-provider failure remains an error without a report.
+
 `SearchMode` limits provider selection and retrieval as well as the returned
 `results` and `sources`: speed selects one provider and returns at most 5
 results, balanced selects up to two and returns at most 10, and quality selects

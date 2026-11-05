@@ -1,10 +1,48 @@
 use std::time::Duration;
 
 use darash::{
-    Error, SafeSearch, SearchClient, SearchMode, SearchQuery, SearchRequest, SearchResponse,
-    SearchSource, TimeRange, WebsurfxQuery, MAX_QUERY_CHARS,
+    ConstraintCoverage, Error, ProviderSelection, SafeSearch, SearchClient, SearchMode,
+    SearchQuery, SearchRequest, SearchResponse, SearchSource, TimeRange, WebsurfxQuery,
+    MAX_QUERY_CHARS,
 };
 use serde_json::json;
+
+#[test]
+fn coverage_round_trips_and_old_responses_remain_readable() {
+    let old: SearchResponse = serde_json::from_value(json!({"results": []})).unwrap();
+    assert!(old.coverage.is_none());
+    let response: SearchResponse = serde_json::from_value(json!({
+        "coverage": {
+            "providers_known": true,
+            "requested_language": "en",
+            "requested_time_range": "week",
+            "providers": [{
+                "provider": "duckduckgo",
+                "selection": "attempted",
+                "language": "not_forwarded",
+                "time_range": "forwarded"
+            }]
+        }
+    }))
+    .unwrap();
+    let coverage = response.coverage.as_ref().unwrap();
+    assert_eq!(
+        coverage.providers[0].selection,
+        ProviderSelection::Attempted
+    );
+    assert_eq!(
+        coverage.providers[0].language,
+        ConstraintCoverage::NotForwarded
+    );
+    assert_eq!(
+        coverage.providers[0].time_range,
+        ConstraintCoverage::Forwarded
+    );
+    assert_eq!(
+        serde_json::to_value(&response).unwrap()["coverage"]["requested_time_range"],
+        "week"
+    );
+}
 
 #[test]
 fn search_request_defaults_and_serializes_as_the_public_contract() {

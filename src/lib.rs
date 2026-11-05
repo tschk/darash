@@ -567,7 +567,19 @@ impl SearchClient {
                 body: truncate_error_body(body),
             });
         }
-        let mut response: SearchResponse = serde_json::from_str(&body).map_err(Error::Decode)?;
+        let mut payload: serde_json::Value = serde_json::from_str(&body).map_err(Error::Decode)?;
+        if let Some(object) = payload.as_object_mut() {
+            object.remove("coverage");
+        }
+        let mut response: SearchResponse =
+            serde_json::from_value(payload).map_err(Error::Decode)?;
+        response.filters = query.filters();
+        response.coverage = Some(SearchCoverage {
+            providers_known: false,
+            requested_language: query.language.clone(),
+            requested_time_range: query.time_range,
+            providers: Vec::new(),
+        });
         retain_http_results(&mut response);
         if response.number_of_results == 0 {
             response.number_of_results = response.results.len() as u64;
@@ -578,7 +590,6 @@ impl SearchClient {
         if response.sources.is_empty() {
             response.sources = response.citations();
         }
-        response.filters = query.filters();
         Ok(response)
     }
 
@@ -676,6 +687,11 @@ fn limit_response(response: &mut SearchResponse, mode: SearchMode) {
 fn retain_http_results(response: &mut SearchResponse) {
     let before = response.results.len();
     response.results.retain(|result| is_http_url(&result.url));
+    let before_sources = response.sources.len();
+    response.sources.retain(|source| is_http_url(&source.url));
+    if response.sources.len() != before_sources {
+        response.filters.filtered = true;
+    }
     if response.results.len() != before {
         response.filters.filtered = true;
         response.sources = response.citations();
@@ -761,6 +777,44 @@ impl ProviderStatus {
     }
 }
 
+/// What Darash knows about a requested constraint, not a guarantee by a provider.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConstraintCoverage {
+    NotRequested,
+    Forwarded,
+    NotForwarded,
+    NotAttempted,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderSelection {
+    Attempted,
+    ModeLimit,
+    Blocked,
+    UnknownEngine,
+}
+
+/// Selection and constraint handling for one local provider or requested engine.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProviderCoverage {
+    pub provider: String,
+    pub selection: ProviderSelection,
+    pub language: ConstraintCoverage,
+    pub time_range: ConstraintCoverage,
+}
+
+/// Provider coverage observed by Darash. Remote services may not expose it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SearchCoverage {
+    pub providers_known: bool,
+    pub requested_language: Option<String>,
+    pub requested_time_range: Option<TimeRange>,
+    pub providers: Vec<ProviderCoverage>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SearchFilters {
     #[serde(default)]
@@ -795,6 +849,9 @@ pub struct SearchResponse {
     pub suggestions: Vec<String>,
     #[serde(default)]
     pub provider_status: Vec<ProviderStatus>,
+    /// Absent in older responses; absence means coverage is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage: Option<SearchCoverage>,
     #[serde(default)]
     pub filters: SearchFilters,
 }
@@ -1366,6 +1423,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_search_rejects_local_paths_in_sources() {
+        let body = r#"{"coverage":"untrusted","results":[{"title":"Safe","url":"https://example.com/","content":"ok"}],"sources":[{"title":"Secret","url":"/etc/passwd","snippet":""},{"title":"Safe","url":"https://example.com/","snippet":"ok"}]}"#;
+        let (endpoint, server) = spawn_http_server(format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let client = SearchClient::new(endpoint).unwrap();
+        let query = SearchQuery::new("test")
+            .with_language("en")
+            .with_time_range(TimeRange::Week);
+        let response = client.search(&query).await.unwrap();
+        server.join().unwrap();
+        assert_eq!(response.cited_sources().len(), 1);
+        assert_eq!(response.cited_sources()[0].url, "https://example.com/");
+        assert!(response.filters.filtered);
+        let coverage = response.coverage.as_ref().unwrap();
+        assert!(!coverage.providers_known);
+        assert_eq!(coverage.requested_language.as_deref(), Some("en"));
+        assert_eq!(coverage.requested_time_range, Some(TimeRange::Week));
+        assert!(coverage.providers.is_empty());
+        assert_eq!(
+            client.search(&query).await.unwrap().coverage,
+            response.coverage
+        );
+    }
+
+    #[tokio::test]
     async fn search_websurfx_fetches_json_and_reports_http_errors() {
         let body = r#"{"results":[{"title":"Rust","url":"https://example.com/rust","description":"A Rust guide.","engine":["DuckDuckGo"],"relevanceScore":0.8}]}"#;
         let (endpoint, server) = spawn_http_server(format!(
@@ -1464,6 +1548,8 @@ mod tests {
         assert!(response.filters.disallowed);
         assert_eq!(response.number_of_results, 0);
         assert_eq!(client.cached_entries(), 1);
+        let coverage = response.coverage.unwrap();
+        assert_eq!(coverage.providers[0].selection, ProviderSelection::Blocked);
     }
 
     #[tokio::test]
