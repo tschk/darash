@@ -27,4 +27,28 @@ jobs:
       - name: Synthetic Chromium fixtures (installed runtime, no downloads)
         env:
           DARASH_TEST_BROWSER: /usr/bin/google-chrome
-        run: cargo test --locked --features browser browser::tests::chromium -- --ignored --test-threads=1
+        run: |
+          set -euo pipefail
+          if [[ ! -x "$DARASH_TEST_BROWSER" ]]; then
+            echo "Chromium executable missing or not executable: $DARASH_TEST_BROWSER" >&2
+            exit 1
+          fi
+          "$DARASH_TEST_BROWSER" --version | grep -E 'Chromium|Google Chrome'
+
+          expected=$(printf '%s\n' \
+            'browser::tests::chromium_cleanup_on_cancellation_and_missing_executable: test' \
+            'browser::tests::chromium_credentials_and_unintercepted_paths_do_not_reach_destinations: test' \
+            'browser::tests::chromium_js_static_path_status_redirects_and_extraction: test' \
+            'browser::tests::chromium_limits_timeouts_and_network_policy: test')
+          actual=$(cargo test --locked --features browser --lib browser::tests::chromium -- --ignored --list | grep ': test$' | sort)
+          if [[ "$actual" != "$expected" ]]; then
+            printf 'Unexpected ignored Chromium tests. Expected:\n%s\nActual:\n%s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
+
+          if ! output=$(cargo test --locked --features browser --lib browser::tests::chromium -- --ignored --test-threads=1); then
+            printf '%s\n' "$output"
+            exit 1
+          fi
+          printf '%s\n' "$output"
+          grep -Eq '^test result: ok\. 4 passed; 0 failed; 0 ignored;' <<< "$output"
