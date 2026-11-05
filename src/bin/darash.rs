@@ -180,7 +180,11 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {
             handle_structured_extraction(extraction, &args, &report)
         }
-        _ => handle_document_extraction(extraction, &args, &report),
+        Extraction::Report
+        | Extraction::Body
+        | Extraction::Markdown
+        | Extraction::Text
+        | Extraction::Outline => handle_document_extraction(extraction, &args, &report),
     }
 }
 
@@ -309,7 +313,9 @@ fn handle_document_extraction(
             }
             Ok(fail_code(args, report))
         }
-        _ => unreachable!(),
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {
+            unreachable!("structured extraction passed to document extraction handler")
+        }
     }
 }
 
