@@ -360,12 +360,6 @@ fn kill_process_group(process_group: Option<u32>) {
             unsafe {
                 libc::kill(-pgid, libc::SIGKILL);
             }
-        } else if pgid > 0 {
-            // Fallback for PID 1, though unlikely for an owned child. Sends signal
-            // directly to the process to avoid `-1` broadcasting.
-            unsafe {
-                libc::kill(pgid, libc::SIGKILL);
-            }
         }
     }
     #[cfg(not(unix))]
@@ -1190,7 +1184,7 @@ mod tests {
     fn test_kill_process_group_safe_against_broadcasting() {
         // If the vulnerability exists, passing 0 or 1 could respectively kill the test runner's
         // process group (via kill(0, SIGKILL)) or indiscriminately kill all allowed processes
-        // (via kill(-1, SIGKILL)). We ensure this does not happen.
+        // (via kill(-1, SIGKILL)). We ensure this does not happen by ignoring these IDs.
         kill_process_group(Some(0));
         kill_process_group(Some(1));
     }
