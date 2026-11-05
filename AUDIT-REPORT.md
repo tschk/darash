@@ -105,3 +105,60 @@ sanitization, configurable filtering, a bounded TTL cache, and dependency-free
 Websurfx response/query adapters. These changes require the v0.4.0 tag and
 package release. Re-run the dependency graph check, package verification,
 advisory scan, and live provider smoke tests before publishing.
+
+## Agent search audit (November 2026)
+
+Darash already separates discovery, fetching and extraction from answer
+generation. That is useful for agents, but a citation is not evidence that a
+requested constraint was applied or that all requested sources were searched.
+Hosts should inspect provider status and treat snippets as untrusted source
+material, not instructions.
+
+### Capability and correctness gaps
+
+- Local DuckDuckGo receives the requested time range, but the OpenAlex and
+  Hacker News adapters do not. None of the local parameter builders sends the
+  requested language. The response's filters describe the request, not a
+  per-provider guarantee. Do not use them to establish a date or language
+  restriction across local results.
+- Speed and balanced modes limit the number of local providers, so an explicit
+  request for several sources may omit some. The limits are documented, but the
+  response does not explain which requested sources were skipped. An agent
+  cannot distinguish an unsearched source from one with no matches solely from
+  the result list.
+- Explicit local engine names that do not match a known adapter fall back to
+  category selection. A typo can therefore search the web rather than the
+  intended engine. Mixed known and unknown names silently discard the unknown
+  names.
+- The serializable `SearchRequest` carries mode and sources, but not the
+  language, time range, pagination or safe-search options available through
+  `SearchQuery`. Adding these fields without reporting provider support would
+  amplify the filter ambiguity above.
+- On November 5, 2026, an anonymous OpenAlex search from the audit environment
+  returned HTTP 429 while Hacker News returned HTTP 200. This is a single
+  observation, not an availability measurement. OpenAlex described the limit
+  as temporary and suggested retrying or using an API key.
+
+### Directions worth pursuing
+
+1. Report requested, applied, unsupported and skipped constraints per provider;
+   add adapter support only where provider semantics are understood and tested.
+   Offer a strict policy so an agent can reject incomplete coverage rather than
+   accidentally present it as exhaustive.
+2. Expose a bounded evidence-gathering workflow that searches diverse sources,
+   fetches selected pages and returns provenance, extraction failures and
+   explicit budgets. Keep model-based synthesis in the host. Do not imply that
+   a search snippet verifies a claim or that fetched content is trustworthy.
+3. Explore query diversification and source diversity as opt-in strategies,
+   with deterministic fixtures and measurable coverage/latency tradeoffs.
+   Preserve individual query and provider provenance so agents can explain why
+   each source was selected and retry only missing coverage.
+4. Evaluate live provider reliability and rate limiting separately from fixture
+   parsing. Public endpoints can change or block automated clients, so surface
+   partial failures rather than silently equating them with empty results.
+
+OpenAlex documents [publication-date and language filters](https://developers.openalex.org/api-reference/works),
+although its [language is detected from metadata, not the full text](https://help.openalex.org/data/languages/).
+The [Hacker News API](https://hn.algolia.com/api) documents `created_at_i`
+numeric filters. Publication dates and discussion creation dates are distinct
+semantics; a shared time-range feature must say which one each provider uses.
