@@ -73,6 +73,15 @@ pub(crate) async fn search_with_outcome(
         }))
         .await;
 
+    finish_search(query, config, &providers, outcomes)
+}
+
+fn finish_search(
+    query: &SearchQuery,
+    config: &SearchConfig,
+    providers: &[SearchSource],
+    outcomes: Vec<(SearchSource, Result<Vec<SearchResult>, ProviderFailure>)>,
+) -> Result<SearchOutcome, Error> {
     let mut results = Vec::new();
     let mut failures = Vec::new();
     let mut provider_status = Vec::with_capacity(outcomes.len());
@@ -91,7 +100,7 @@ pub(crate) async fn search_with_outcome(
             }
         }
     }
-    if results.is_empty() && !failures.is_empty() {
+    if !failures.is_empty() && failures.len() == provider_status.len() {
         return Err(Error::Local(
             failures
                 .iter()
@@ -765,6 +774,50 @@ struct HackerNewsHit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_success_and_failure_preserve_both_provider_statuses() {
+        let query = SearchQuery::new("rust");
+        let config = SearchConfig::new("http://localhost:8080").unwrap();
+        let selected = [SearchSource::Academic, SearchSource::Discussions];
+        let outcome = finish_search(
+            &query,
+            &config,
+            &selected,
+            vec![
+                (SearchSource::Academic, Ok(vec![])),
+                (
+                    SearchSource::Discussions,
+                    Err(ProviderFailure::new(SearchSource::Discussions, "offline")),
+                ),
+            ],
+        )
+        .expect("one provider succeeded");
+        assert!(outcome.response.results.is_empty());
+        assert_eq!(
+            outcome.response.provider_status,
+            vec![
+                ProviderStatus::success("openalex", 0),
+                ProviderStatus::failed("hacker-news", "offline"),
+            ]
+        );
+        assert!(finish_search(
+            &query,
+            &config,
+            &selected,
+            vec![
+                (
+                    SearchSource::Academic,
+                    Err(ProviderFailure::new(SearchSource::Academic, "offline"))
+                ),
+                (
+                    SearchSource::Discussions,
+                    Err(ProviderFailure::new(SearchSource::Discussions, "offline"))
+                ),
+            ],
+        )
+        .is_err());
+    }
 
     #[test]
     fn resolves_redirected_and_rejects_unsafe_urls() {
