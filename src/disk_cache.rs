@@ -169,20 +169,22 @@ pub fn should_cache(
         && !is_credential_url(url)
 }
 
-/// Whether a URL's query parameters look credential-bearing.
+/// Whether a URL contains userinfo credentials or credential-like query names.
 ///
 /// Parameter names are snake-cased and matched as whole `_`-separated segments
 /// against a small keyword set, so `access_token=…` and `apiKey=…` bypass the
 /// cache while `monkey=…` does not.
 pub fn is_credential_url(url: &str) -> bool {
+    if let Ok(parsed) = url::Url::parse(url) {
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return true;
+        }
+    }
     let Some((_, query)) = url.split_once('?') else {
         return false;
     };
     let query = query.split('#').next().unwrap_or(query);
-    query
-        .split('&')
-        .filter(|pair| !pair.is_empty())
-        .any(|pair| is_credential_param(pair.split('=').next().unwrap_or("")))
+    url::form_urlencoded::parse(query.as_bytes()).any(|(name, _)| is_credential_param(&name))
 }
 
 /// Whether one query parameter name looks credential-bearing.
@@ -324,6 +326,49 @@ mod tests {
         assert!(!is_credential_url("https://example.com/"));
         assert!(!should_cache(
             "https://example.com/?token=abc",
+            "GET",
+            false,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn userinfo_credentials_bypass_cache() {
+        for url in [
+            "https://user@example.com/path",
+            "https://user:password@example.com/path",
+            "https://:password@example.com/path",
+        ] {
+            assert!(!should_cache(url, "GET", false, false, false), "{url}");
+        }
+        assert!(should_cache(
+            "https://example.com/@user",
+            "GET",
+            false,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn encoded_credential_parameter_names_bypass_cache() {
+        for url in [
+            "https://example.com/?%74oken=abc",
+            "https://example.com/?access%5Ftoken=abc",
+            "https://example.com/?api%4Bey=abc",
+        ] {
+            assert!(!should_cache(url, "GET", false, false, false), "{url}");
+        }
+        assert!(should_cache(
+            "https://example.com/?mon%6bey=1",
+            "GET",
+            false,
+            false,
+            false
+        ));
+        assert!(should_cache(
+            "https://example.com/?q=token",
             "GET",
             false,
             false,
