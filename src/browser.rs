@@ -909,8 +909,8 @@ mod tests {
                             "/tamper" => (200, "Content-Type: text/html\r\n".into(), "<script>TextEncoder=class {encode(){return []}}; document.write('<main>'+'x'.repeat(4096)+'</main>')</script>".into()),
                             "/slow" => { tokio::time::sleep(Duration::from_secs(3)).await; (200, String::new(), "Slow".into()) },
                             "/download" => (200, "Content-Disposition: attachment; filename=download.html\r\n".into(), "<main>Download</main>".into()),
-                            "/auth" => (200, "Content-Type: text/html\r\nSet-Cookie: secret=value; Secure; HttpOnly; SameSite=Strict\r\n".into(), "<script>fetch('/auth-hop',{headers:{Authorization:'secret'}}).then(()=>document.body.innerHTML='<main id=ready>Done</main>')</script>".into()),
-                            "/auth-hop" => (302, format!("Location: http://other.fixture.test:{}/capture\r\n", address.port()), String::new()),
+                            "/credential-test" => (200, "Content-Type: text/html\r\nSet-Cookie: test_cookie=value\r\n".into(), "<script>fetch('/credential-hop',{headers:{Authorization:'test_token'}}).then(()=>document.body.innerHTML='<main id=ready>Done</main>')</script>".into()),
+                            "/credential-hop" => (302, format!("Location: http://other.fixture.test:{}/capture\r\n", address.port()), String::new()),
                             "/unsupported" => (200, "Content-Type: text/html\r\n".into(), format!("<script>new WebSocket('ws://127.0.0.1:{0}/secret'); new Worker('/worker.js'); navigator.serviceWorker.register('/sw.js').catch(()=>{{}}); window.open('http://127.0.0.1:{0}/secret'); setTimeout(()=>document.body.innerHTML='<main id=ready>Done</main>',300)</script>", address.port())),
                             "/worker.js" | "/sw.js" => (200, "Content-Type: text/javascript\r\n".into(), format!("fetch('http://127.0.0.1:{}/secret')", address.port())),
                             "/capture" => (200, "Access-Control-Allow-Origin: *\r\nContent-Type: text/plain\r\n".into(), "Captured".into()),
@@ -1142,7 +1142,7 @@ mod tests {
         let fixture = Fixture::start().await;
         let mut options = browser_options();
         options.wait_for = Some("#ready".into());
-        fixture.fetch("/auth", &options).await.unwrap();
+        fixture.fetch("/credential-test", &options).await.unwrap();
         let requests = fixture.requests.lock().unwrap().clone();
         assert!(requests.iter().any(|request| request.contains("/capture")));
         for request in requests {
