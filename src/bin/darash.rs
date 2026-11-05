@@ -167,18 +167,18 @@ fn handle_unstructured_extraction(
     extraction: Extraction,
     args: &FetchArgs,
     report: &FetchReport,
-) -> Result<Option<i32>, String> {
+) -> Result<i32, String> {
     match extraction {
         Extraction::Report => {
             let rendered =
                 serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?;
             println!("{rendered}");
-            Ok(Some(fail_code(args, report)))
+            Ok(fail_code(args, report))
         }
         Extraction::Body => {
             eprintln!("darash fetch: {}", report.summary());
             println!("{}", report.body);
-            Ok(Some(fail_code(args, report)))
+            Ok(fail_code(args, report))
         }
         Extraction::Markdown | Extraction::Text => {
             let main = if args.main_content {
@@ -205,7 +205,7 @@ fn handle_unstructured_extraction(
             };
             eprintln!("darash fetch: {}", report.summary());
             emit_document(rendered, report, args.budget, args.json);
-            Ok(Some(fail_code(args, report)))
+            Ok(fail_code(args, report))
         }
         Extraction::Outline => {
             let entries = fetch::outline(&report.body);
@@ -235,9 +235,11 @@ fn handle_unstructured_extraction(
             } else {
                 emit_plain(&budgeted.items);
             }
-            Ok(Some(fail_code(args, report)))
+            Ok(fail_code(args, report))
         }
-        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => Ok(None),
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate => {
+            unreachable!("structured extraction handled elsewhere")
+        }
     }
 }
 
@@ -301,11 +303,14 @@ async fn run_fetch(args: FetchArgs) -> Result<i32, String> {
         return Ok(fail_code(&args, &report));
     }
 
-    if let Some(code) = handle_unstructured_extraction(extraction, &args, &report)? {
-        return Ok(code);
+    if matches!(
+        extraction,
+        Extraction::Select | Extraction::Row | Extraction::Table | Extraction::Locate
+    ) {
+        handle_structured_extraction(extraction, &args, &report)
+    } else {
+        handle_unstructured_extraction(extraction, &args, &report)
     }
-
-    handle_structured_extraction(extraction, &args, &report)
 }
 
 fn handle_structured_extraction(
