@@ -351,11 +351,14 @@ impl Drop for BrowserProcess {
 
 fn kill_process_group(process_group: Option<u32>) {
     #[cfg(unix)]
-    if let Some(pid) = process_group {
+    if let Some(pid) = process_group
+        .and_then(|pid| i32::try_from(pid).ok())
+        .filter(|pid| *pid > 1)
+    {
         // SAFETY: launch creates a new process group whose ID is the owned child
         // PID. A negative PID targets that group, never the caller's process group.
         unsafe {
-            libc::kill(-(pid as i32), libc::SIGKILL);
+            libc::kill(-pid, libc::SIGKILL);
         }
     }
     #[cfg(not(unix))]
