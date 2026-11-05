@@ -30,7 +30,7 @@ libc = { version = "0.2", optional = true }
 default = ["client", "search"]
 # HTTP client (reqwest): search + the library `fetch()` fn. Extraction is
 # always available; disable `client` for wasm/no-network builds.
-client = ["dep:reqwest", "dep:native-tls", "dep:futures-util", "dep:tokio"]
+client = ["dep:reqwest", "dep:native-tls", "dep:futures-util", "dep:tokio", "tokio/io-util"]
 search = ["client"]
 # Uses an explicitly supplied installed Chromium; never downloads a browser.
 browser = ["client", "dep:tokio-tungstenite", "dep:tempfile", "dep:base64", "dep:libc", "tokio/process", "tokio/net", "tokio/time", "tokio/io-util"]

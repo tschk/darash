@@ -852,8 +852,15 @@ pub fn apply_budget(items: Vec<String>, budget: Option<usize>) -> Budgeted {
 /// Read a local file as a fetch report. URLs stay on the network path.
 #[cfg(feature = "client")]
 pub async fn read_source(path: impl AsRef<std::path::Path>) -> Result<FetchReport, Error> {
+    use tokio::io::AsyncReadExt;
+
     let path = path.as_ref();
-    let bytes = tokio::fs::read(path)
+    let file = tokio::fs::File::open(path)
+        .await
+        .map_err(|error| Error::SourceRead(format!("cannot read {}: {error}", path.display())))?;
+    let mut bytes = Vec::new();
+    file.take(FETCH_MAX_BODY_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
         .await
         .map_err(|error| Error::SourceRead(format!("cannot read {}: {error}", path.display())))?;
     if bytes.len() > FETCH_MAX_BODY_BYTES {
@@ -1438,6 +1445,18 @@ mod tests {
         assert!(report.ok);
         assert_eq!(report.body, "<h1>Local</h1>");
         assert!(report.summary().starts_with("status=local ok=true"));
+
+        std::fs::write(&path, vec![b'x'; FETCH_MAX_BODY_BYTES]).expect("fixture writes");
+        let report = read_source(&path).await.expect("limit is inclusive");
+        assert_eq!(report.bytes, FETCH_MAX_BODY_BYTES);
+
+        std::fs::write(&path, vec![b'x'; FETCH_MAX_BODY_BYTES + 1]).expect("fixture writes");
+        assert!(matches!(
+            read_source(&path).await,
+            Err(Error::FetchBodyTooLarge {
+                limit: FETCH_MAX_BODY_BYTES
+            })
+        ));
 
         std::fs::remove_file(&path).ok();
     }
