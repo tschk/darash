@@ -878,23 +878,14 @@ fn parse_search_args(args: &[String]) -> Result<Option<SearchArgs>, String> {
 fn parse_fetch_args(args: &[String]) -> Result<Option<FetchArgs>, String> {
     let mut parsed = FetchArgs::default();
 
-    // Check if "--" exists and separate positional args if it does
-    let (lexopt_args, trailing_args) = if let Some(dash_dash) = args.iter().position(|s| s == "--")
-    {
-        (&args[..dash_dash], &args[dash_dash + 1..])
-    } else {
-        (args, &[][..])
-    };
-
     // Note: lexopt expects the first argument to be the program name/binary name and ignores it!
     // Since we pass `args` which are already skipped, we need to prefix a dummy binary name
     // so lexopt doesn't drop the first actual argument.
     let mut args_for_lexopt = vec![std::ffi::OsString::from("dummy_bin_name")];
-    args_for_lexopt.extend(lexopt_args.iter().map(std::ffi::OsString::from));
+    args_for_lexopt.extend(args.iter().map(std::ffi::OsString::from));
     let mut parser = lexopt::Parser::from_iter(args_for_lexopt);
     use lexopt::prelude::*;
 
-    // A helper macro so we don't borrow parser multiple times
     macro_rules! get_string {
         () => {
             parser
@@ -984,13 +975,6 @@ fn parse_fetch_args(args: &[String]) -> Result<Option<FetchArgs>, String> {
             Long(name) => return Err(format!("unknown option: --{name}")),
             Short(name) => return Err(format!("unknown option: -{name}")),
         }
-    }
-
-    for val in trailing_args {
-        if !parsed.input.is_empty() {
-            return Err(format!("unexpected argument: {val}"));
-        }
-        parsed.input = val.clone();
     }
 
     if parsed.input.is_empty() {
