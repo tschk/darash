@@ -354,10 +354,12 @@ fn kill_process_group(process_group: Option<u32>) {
     if let Some(pid) = process_group {
         // SAFETY: launch creates a new process group whose ID is the owned child
         // PID. A negative PID targets that group, never the caller's process group.
-        let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(-(pid as i32)),
-            nix::sys::signal::Signal::SIGKILL,
-        );
+        if pid > 1 {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(-(pid as i32)),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
     }
     #[cfg(not(unix))]
     let _ = process_group;
@@ -990,7 +992,10 @@ mod tests {
         assert!(!profile_path.exists());
         for _ in 0..100 {
             // SAFETY: signal 0 only checks existence of this owned process group.
-            if nix::sys::signal::kill(nix::unistd::Pid::from_raw(-(group as i32)), None).is_err() {
+            if group > 1
+                && nix::sys::signal::kill(nix::unistd::Pid::from_raw(-(group as i32)), None)
+                    .is_err()
+            {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
@@ -1123,10 +1128,12 @@ mod tests {
         assert!(!profile.exists(), "temporary profile survived cancellation");
         #[cfg(unix)]
         // SAFETY: signal 0 only checks existence of the owned process group.
-        assert!(
-            nix::sys::signal::kill(nix::unistd::Pid::from_raw(-(pid as i32)), None).is_err(),
-            "browser process group survived cancellation"
-        );
+        if pid > 1 {
+            assert!(
+                nix::sys::signal::kill(nix::unistd::Pid::from_raw(-(pid as i32)), None).is_err(),
+                "browser process group survived cancellation"
+            );
+        }
         let fixture = Fixture::start().await;
         assert!(matches!(
             fixture
